@@ -1,0 +1,8 @@
+{
+  "uuid": "claudia-pet@kirito1207.github.io",
+  "name": "claudia-pet",
+  "description": "让 claudia-pet 桌宠跟着 Claude 桌面端的窗口：把 Claude 窗口的位置、最小化、工作区和被哪些窗口盖住告诉桌宠（D-Bus）。不改 Claude，也不提供别的功能。非官方同人项目，与 Anthropic 无关。",
+  "shell-version": ["50"],
+  "url": "https://github.com/kirito1207/claudia-pet",
+  "version-name": "0.1"
+}

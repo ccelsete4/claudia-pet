@@ -5,7 +5,7 @@
   claudia-pet --show | --quit       叫出来 / 退出
   claudia-pet --ensure              给 Claude 用：没开就打开（Claude Code 插件、桌面端 MCP 调）
   claudia-pet --mcp                 给 Claude 桌面端用的 MCP 服务（stdio）
-  claudia-pet --connect [plugin|mcp|all] / --disconnect [...]   接入 / 撤销
+  claudia-pet --connect [plugin|mcp|gnome|all] / --disconnect [...]   接入 / 撤销（gnome = 跟着 Claude 窗口的 GNOME 扩展）
   claudia-pet --pet 2 [--mode desktop|claude]                   多开的那几只，由第一只带起来
 """
 import os
@@ -118,12 +118,15 @@ def main(args):
         what = arg_after(args, flag) or "all"
         store.DATA.mkdir(parents=True, exist_ok=True)
         code = 0
-        for t in (["plugin", "mcp"] if what == "all" else [what]):
+        targets = ["plugin", "mcp"] + (["gnome"] if claude.gnome_session() else []) if what == "all" else [what]
+        for t in targets:
             try:
                 if t == "plugin":
                     msg = claude.set_plugin(install)
                 elif t == "mcp":
                     msg = claude.set_mcp(install)
+                elif t == "gnome":
+                    msg = claude.set_gnome_extension(install)
                 else:
                     raise ValueError("不认识：" + t)
             except Exception as e:

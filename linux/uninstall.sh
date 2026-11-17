@@ -1,5 +1,5 @@
 #!/bin/sh
-# 卸载 claudia-pet Linux 版：撤销两项接入和隐藏快捷键，删除程序；加 --keep-data 保留 ~/.claudia（设置、日志、立绘）。
+# 卸载 claudia-pet Linux 版：撤销接入（插件、桌面端 MCP、GNOME 扩展）和隐藏快捷键，删除程序；加 --keep-data 保留 ~/.claudia（设置、日志、立绘）。
 set -eu
 
 DST="${XDG_DATA_HOME:-$HOME/.local/share}/claudia-pet"

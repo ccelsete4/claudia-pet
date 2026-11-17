@@ -4,8 +4,8 @@
 窗口摆在哪、鼠标、读 Claude Code 插件写的状态文件、菜单、设置、通知、多开。
 
 窗口坐标一律按 GDK 的逻辑像素（XWayland 下就是屏幕像素），网页里的物理也按这一套算。
-「待在 Claude 窗口里」在 Linux 上还没做（Wayland 不让普通程序读别的窗口的位置，要靠 GNOME Shell 扩展），
-现在一律待在桌面上。
+「待在 Claude 窗口里」：Wayland 下桌宠看不到 Claude 的窗口，靠 GNOME Shell 扩展报来位置（claude_window.py）。
+扩展没装 / 没启用时一律待在桌面上。
 """
 import math
 import os
@@ -19,13 +19,14 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from . import actions, claude, store, system, web, xshape  # noqa: E402
+from .claude_window import ClaudeWindowWatch  # noqa: E402
 from .notices import TaskNoticePolicy  # noqa: E402
 
 BASE_W, BASE_H = 260, 362
 STAGGER_X = 190
 HOME_OFF_RIGHT = 40
+DEFAULT_OFF_BOTTOM = 100   # 待在 Claude 窗口里：默认离 Claude 窗口右下角多远（同 Windows 版）
 WALK_MIN_ROOM = 24
-CLAUDE_WINDOW_SUPPORTED = False   # 跟着 Claude 窗口：下一步做
 
 PHYSICS_RANGES = {
     "throwPower": (0.2, 2.5, 1.0),
@@ -69,6 +70,10 @@ class Pet:
         self.desktop_mode = True
         self.was_standalone = False
         self.claude_pids = set()
+        self.claude_watch = None
+        self.last_claude = None      # 上次按哪个 Claude 窗口范围摆的：变了就按离右下角多远重新摆
+        self.off_right, self.off_bottom = 0, DEFAULT_OFF_BOTTOM
+        self.vis_applied = False
         self.claude_seen_at = None
         self.follow_since = time.monotonic()
         self.top_at = 0.0
@@ -102,10 +107,14 @@ class Pet:
         if store.is_main():
             store.sync_resources()
         self.was_standalone = store.standalone()
+        self.load_follow_offsets()
+        self.claude_watch = ClaudeWindowWatch(self.on_claude_window)
         self.desktop_mode = self.want_desktop()
         c = store.settings.get("character")
         self.current = c if isinstance(c, str) else "claude"
-        store.log(f"运行方式：{'独立运行' if self.was_standalone else '跟着 Claude'}，待在桌面上")
+        store.log(f"运行方式：{'独立运行' if self.was_standalone else '跟着 Claude'}，"
+                  f"{'待在桌面上' if self.desktop_mode else '待在 Claude 窗口里'}"
+                  f"（GNOME 扩展{'在' if self.claude_watch.available else '不在'}）")
 
         # 不归窗口管理器管的窗口（X11 override-redirect）：GNOME 会把普通窗口推回屏幕里（头顶的透明区伸不出屏幕顶，
         # 碰边判定就不对），挪窗口也要先经过它、拖起来慢半拍。这种窗口自己定位置、挪了马上生效，天然在最上层、不进任务栏
@@ -151,7 +160,7 @@ class Pet:
         # 不挪到屏幕外再挪回来：挪回来的头几帧 WebKit 还没重画，同样会闪。藏起来也是把外形设成空（不靠不透明度：
         # 不归窗口管理器管的窗口，GNOME 不一定认它的不透明度）
         self.revealed = False
-        self.place_on_desktop(initial=True)
+        self.place_home(initial=True)
         w.move(self.x, self.y)
         w.show_all()
         self.apply_input_shape(force_empty=True)
@@ -254,11 +263,34 @@ class Pet:
         if self.revealed or self.window is None:
             return False
         self.revealed = True
-        if not self.concealed:
-            xshape.set_visible(self.xid(), True)
+        self.apply_visibility()
+        return False
+
+    def on_screen(self):
+        """现在该不该看得见：画好了、没被藏起来（快捷键 / 菜单），在 Claude 窗口里时 Claude 也看得见、她没被别的窗口盖住"""
+        return self.revealed and not self.concealed and self.shown
+
+    def apply_visibility(self):
+        vis = self.on_screen()
+        if vis == self.vis_applied or self.window is None:
+            return
+        self.vis_applied = vis
+        if not vis:
+            self.close_menu()
+        xshape.set_visible(self.xid(), vis)
+        self.applied_hit = None
+        self.apply_input_shape(force_empty=not vis)
+        if vis:
             self.top_at = 0
             self.keep_on_top()
-        return False
+            self.update_hit_rects()
+        self.update_page_hidden()
+
+    def set_shown(self, v):
+        if self.shown == v:
+            return
+        self.shown = v
+        self.apply_visibility()
 
     def on_web_message(self, m):
         if "hitRects" in m:
@@ -390,12 +422,23 @@ class Pet:
                 store.log(("没找到 Claude 桌面端，" if never else "Claude 关了，") + store.APP_NAME + (" 退出" if never else " 跟着退出"))
                 self.quit()
                 return
-        self.desktop_place()
+        self.follow_place()
+
+    def claude_found(self):
+        st = self.claude_watch.state if self.claude_watch else None
+        return bool(st and st.get("found"))
 
     def want_desktop(self):
-        if not CLAUDE_WINDOW_SUPPORTED:
+        """该待在哪：选了桌面就桌面；没有 GNOME 扩展只能待在桌面；扩展没找到 Claude 的窗口（没开，或者认不出来），
+        也先待在桌面上（不改存着的设置），找到了再回去。最小化不算没找到：最小化时她跟着藏起来"""
+        if not (self.claude_watch and self.claude_watch.available):
             return True
-        return self.on_desktop() or store.standalone() and not self.claude_pids
+        return self.on_desktop() or not self.claude_found()
+
+    def check_area(self):
+        desk = self.want_desktop()
+        if desk != self.desktop_mode:
+            self.switch_area(desk)
 
     def check_run_mode(self):
         s = store.standalone()
@@ -406,6 +449,138 @@ class Pet:
                 self.claude_seen_at = None
             store.log("运行方式：" + ("独立运行" if s else "跟着 Claude"))
             self.push_settings()
+        self.check_area()
+
+    def on_claude_window(self, watch):
+        """扩展报来新状态（Claude 窗口挪了、改大小、最小化、换工作区、被盖住，或者扩展出现 / 消失了）"""
+        was = getattr(self, "ext_seen", None)
+        if was != watch.available:
+            self.ext_seen = watch.available
+            self.push_settings()
+        self.check_area()
+        self.follow_place()
+
+    def switch_area(self, desktop):
+        """真正换地方（不改设置）：改了「待在哪」、扩展出现 / 消失、独立运行时 Claude 开了 / 关了"""
+        if self.window is None:
+            self.desktop_mode = desktop
+            return
+        self.stop_walk(None)
+        self.stop_motion(False)
+        self.desktop_mode = desktop
+        self.last_claude = None
+        store.log("换到" + ("桌面上" if desktop else " Claude 窗口里"))
+        if desktop:
+            self.place_on_desktop()
+            self.set_shown(True)
+        else:
+            self.shown = False   # 下面按 Claude 窗口重新摆，摆好了才露出来
+            self.apply_visibility()
+            self.follow_place()
+
+    def place_home(self, initial=False):
+        if self.desktop_mode:
+            self.place_on_desktop(initial=initial)
+        else:
+            self.shown = False
+            self.follow_place(initial=initial)
+
+    # ================= 跟着 Claude 窗口 =================
+    # 照 Windows 版（Pet.Follow.cs）：位置按「离 Claude 窗口右下角多远」记；Claude 窗口挪动、改大小，她跟着走；
+    # 拖到窗口外松手会被推回来。Claude 最小化、不在当前工作区、或者她站的地方被别的窗口盖住时藏起来
+    def load_follow_offsets(self):
+        self.off_right, self.off_bottom = self.home_off_right(), DEFAULT_OFF_BOTTOM
+        f = store.settings.get("follow")
+        if isinstance(f, dict):
+            try:
+                self.off_right = int(f.get("right", self.off_right))
+                self.off_bottom = int(f.get("bottom", self.off_bottom))
+            except (TypeError, ValueError):
+                pass
+
+    def claude_rect(self):
+        """Claude 主窗口看得见时它的范围 (left, top, right, bottom)，看不见（没开、最小化、在别的工作区）返回 None"""
+        st = self.claude_watch.state if self.claude_watch else None
+        if not st or not st.get("found") or not st.get("visible"):
+            return None
+        try:
+            x, y, w, h = (int(v) for v in st["rect"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return (x, y, x + w, y + h) if w > 0 and h > 0 else None
+
+    def body_rect(self):
+        """人物本体在屏幕上的范围（能点到的区域里最大的那块）"""
+        best = None
+        for r in self.hit_rects or []:
+            if isinstance(r, list) and len(r) == 4 and all(isinstance(v, (int, float)) for v in r):
+                if best is None or r[2] * r[3] > best[2] * best[3]:
+                    best = r
+        if best is None:
+            return self.x, self.y, self.x + self.w, self.y + self.h
+        z = self.zoom()
+        return (self.x + best[0] * z, self.y + best[1] * z, self.x + (best[0] + best[2]) * z, self.y + (best[1] + best[3]) * z)
+
+    def covered(self):
+        """她站的地方有没有被叠在 Claude 上面的窗口盖住（盖住一点也算：Wayland 下没法只挡一部分，整只藏起来）"""
+        st = self.claude_watch.state if self.claude_watch else None
+        covers = st.get("covers") if st else None
+        if not covers:
+            return False
+        l, t, r, b = self.body_rect()
+        for c in covers:
+            try:
+                x, y, w, h = (float(v) for v in c)
+            except (TypeError, ValueError):
+                continue
+            if x < r and x + w > l and y < b and y + h > t:
+                return True
+        return False
+
+    def follow_place(self, initial=False):
+        """按 Claude 窗口现在的样子把她摆好：扩展报来新状态、每秒一次都走这里"""
+        if self.window is None:
+            return
+        if self.desktop_mode:
+            if not initial:
+                self.desktop_place()
+            return
+        c = self.claude_rect()
+        if c is None:
+            self.stop_motion(False)
+            self.stop_walk(None)
+            self.set_shown(False)
+            return
+        if self.dragging or self.flying:   # 你在拖：随你（Claude 窗口挪了，边界跟着挪）
+            self.last_claude = c
+            self.update_motion_geometry()
+            return
+        changed = self.last_claude != c
+        if initial or not self.shown or changed:
+            x, y = c[2] - self.w - self.off_right, c[3] - self.h - self.off_bottom
+        else:
+            x, y = self.x, self.y
+        self.last_claude = c
+        x0, y0, x1, y1 = self.bounds()
+        x, y = _clamp(x, x0, x1), _clamp(y, y0, y1)
+        if initial:
+            self.x, self.y = x, y
+        elif not self.walking:
+            self.move_to(x, y)
+        self.set_shown(not self.covered())
+
+    def save_follow_offsets(self):
+        """拖完松手、走完路、改完大小：推回 Claude 窗口里，记下离右下角多远"""
+        c = self.claude_rect()
+        if c is None:
+            return
+        x0, y0, x1, y1 = self.bounds()
+        x, y = _clamp(self.x, x0, x1), _clamp(self.y, y0, y1)
+        self.move_to(x, y)
+        self.off_right, self.off_bottom = c[2] - (x + self.w), c[3] - (y + self.h)
+        self.last_claude = c
+        store.settings["follow"] = {"right": self.off_right, "bottom": self.off_bottom}
+        store.save_settings()
 
     # ================= 窗口位置 =================
     def move_to(self, x, y):
@@ -429,6 +604,11 @@ class Pet:
         return r.x, r.y, r.x + r.width, r.y + r.height
 
     def area_rect(self):
+        """她能活动的范围：桌面上是显示器工作区，Claude 窗口里是 Claude 窗口"""
+        if not self.desktop_mode:
+            c = self.claude_rect()
+            if c is not None:
+                return c
         return self.work_area(at_pointer=self.dragging)
 
     def body_margins(self):
@@ -472,9 +652,10 @@ class Pet:
         y = _clamp(y, wa.y - mt, wa.y + wa.height - self.h)
         if initial:
             self.x, self.y = x, y
+            self.shown = True
         else:
             self.move_to(x, y)
-        self.shown = True
+            self.set_shown(True)
         self.top_at = 0
         self.keep_on_top()
 
@@ -491,7 +672,7 @@ class Pet:
         self.keep_on_top()
 
     def keep_on_top(self):
-        if self.concealed or self.window is None:
+        if not self.on_screen() or self.window is None:
             return
         now = time.monotonic()
         if now - self.top_at < 5:
@@ -502,6 +683,9 @@ class Pet:
             gw.raise_()
 
     def save_position(self):
+        if not self.desktop_mode:
+            self.save_follow_offsets()
+            return
         x0, y0, x1, y1 = self.bounds()
         x, y = _clamp(self.x, x0, x1), _clamp(self.y, y0, y1)
         self.move_to(x, y)
@@ -513,9 +697,16 @@ class Pet:
 
     def recenter(self):
         self.stop_motion(False)
-        store.settings.pop("desk", None)
-        store.save_settings()
-        self.place_on_desktop()
+        if self.desktop_mode:
+            store.settings.pop("desk", None)
+            store.save_settings()
+            self.place_on_desktop()
+        else:
+            store.settings.pop("follow", None)
+            store.save_settings()
+            self.load_follow_offsets()
+            self.last_claude = None
+            self.follow_place()
         if self.user_hidden:
             self.set_user_hidden(False)
         self.set_concealed(False)
@@ -538,7 +729,7 @@ class Pet:
         if gw is None or not hasattr(gw, "get_xid"):
             return
         rects = []
-        if not force_empty and not self.concealed and self.hit_rects:
+        if not force_empty and self.on_screen() and self.hit_rects:
             z = self.zoom()
             for r in self.hit_rects:
                 if isinstance(r, list) and len(r) == 4:
@@ -785,6 +976,9 @@ class Pet:
         if w["x"] >= x1:
             w["x"], edge = x1, True
         self.move_to(w["x"], self.y)
+        c = None if self.desktop_mode else self.claude_rect()
+        if c is not None:
+            self.off_right, self.off_bottom = c[2] - (self.x + self.w), c[3] - (self.y + self.h)
         if edge:
             self.stop_walk("edge")
             return False
@@ -883,19 +1077,8 @@ class Pet:
             return
         self.concealed = c
         if c:
-            self.close_menu()
             self.stop_motion()
-            xshape.set_visible(self.xid(), False)
-        else:
-            if self.revealed:
-                xshape.set_visible(self.xid(), True)
-            self.top_at = 0
-            self.keep_on_top()
-        self.applied_hit = None
-        self.apply_input_shape(force_empty=c)
-        if not c:
-            self.update_hit_rects()
-        self.update_page_hidden()
+        self.apply_visibility()
 
     def update_page_hidden(self):
         hidden = self.concealed or self.session_locked or not self.shown
@@ -1132,7 +1315,7 @@ class Pet:
         hotkeys = [{"id": "off", "label": "不用快捷键"}] + [{"id": i, "label": label} for i, label, _ in system.CHOICES]
         return {
             "version": store.version() + " Linux", "platform": "linux", "appVersion": store.version(),
-            "claudeWindow": CLAUDE_WINDOW_SUPPORTED,
+            "claudeWindow": bool(self.claude_watch and self.claude_watch.available),
             "size": self.scale(), "textSize": self.text_scale(), "textLinked": self.text_linked(), "showName": self.show_name(),
             "aura": self.aura_mode(), "powerSave": store.flag("powerSave"), "quotaStyle": self.quota_style(),
             "clickBounce": store.setting_on("clickBounce"), "tumbleActions": store.setting_on("tumbleActions"),
@@ -1144,7 +1327,7 @@ class Pet:
             "hideHotkey": self.hide_hotkey(), "hotkeyFailed": self.hotkey_failed, "hotkeys": hotkeys,
             "hotkeyHint": "按一下藏起来，再按一下出来（加在 GNOME 设置的「自定义快捷键」里）；也可以从托盘菜单叫她出来",
             "character": self.current, "characters": chars,
-            "integrations": claude.integrations(),
+            "integrations": claude.integrations(bool(self.claude_watch and self.claude_watch.available)),
             "runMode": "standalone" if store.standalone() else "claude",
             "pets": self.pet_list(), "maxPets": store.MAX_EXTRA_PETS + 1,
         }
@@ -1223,7 +1406,7 @@ class Pet:
             self.handle_pet_command(msg)
         elif cmd == "integrate":
             target, action = msg.get("target"), msg.get("action")
-            if target in ("plugin", "mcp") and action in ("install", "uninstall"):
+            if target in ("plugin", "mcp", "gnome") and action in ("install", "uninstall"):
                 self.integrate(target, action == "install")
         elif cmd == "action":
             name = msg.get("name")
@@ -1246,7 +1429,7 @@ class Pet:
 
     def integrate(self, target, install):
         try:
-            message = claude.set_plugin(install) if target == "plugin" else claude.set_mcp(install)
+            message = {"plugin": claude.set_plugin, "mcp": claude.set_mcp, "gnome": claude.set_gnome_extension}[target](install)
         except Exception as e:
             message = "没有完成：" + str(e)
             store.log(f"接入 {target} 失败: {e!r}")
@@ -1409,7 +1592,8 @@ class Pet:
             return
         store.settings["mode"] = "desktop" if desktop else "claude"
         store.save_settings()
-        store.log("改成待在桌面上" if desktop else "改成待在 Claude 窗口里（Linux 上还没做，先待在桌面上）")
+        store.log("改成待在桌面上" if desktop else "改成待在 Claude 窗口里")
+        self.check_area()
 
     def handle_pet_command(self, msg):
         action, value = msg.get("action"), msg.get("value")

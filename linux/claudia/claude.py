@@ -143,15 +143,94 @@ def seen_text():
     return "上次收到消息：" + when
 
 
-def integrations():
+# ---------------- GNOME Shell 扩展（跟着 Claude 窗口） ----------------
+# 装到 ~/.local/share/gnome-shell/extensions/<uuid>，再把 uuid 加进 org.gnome.shell 的 enabled-extensions。
+# Wayland 下 GNOME Shell 只在登录时加载扩展：装好、更新、撤销都要注销重新登录一次（是电脑的登录，不是 Claude 账号）
+EXTENSION_UUID = "claudia-pet@kirito1207.github.io"
+
+
+def gnome_session():
+    return "GNOME" in (os.environ.get("XDG_CURRENT_DESKTOP") or "").upper() and shutil.which("gnome-shell") is not None
+
+
+def extension_src():
+    return store.INSTALL / "linux" / "gnome-extension" / EXTENSION_UUID
+
+
+def extension_dst():
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "gnome-shell" / "extensions" / EXTENSION_UUID
+
+
+def _shell_settings():
+    from gi.repository import Gio
+    src = Gio.SettingsSchemaSource.get_default()
+    if src is None or src.lookup("org.gnome.shell", True) is None:
+        return None
+    return Gio.Settings.new("org.gnome.shell")
+
+
+def extension_enabled():
+    st = _shell_settings()
+    return bool(st) and EXTENSION_UUID in st.get_strv("enabled-extensions")
+
+
+def extension_installed():
+    return (extension_dst() / "metadata.json").exists() and extension_enabled()
+
+
+def set_gnome_extension(install):
+    from gi.repository import Gio
+    st = _shell_settings()
+    if st is None:
+        raise RuntimeError("这台电脑不是 GNOME 桌面，用不了这个扩展；她会一直待在桌面上。")
+    dst = extension_dst()
+    if not install and not dst.exists() and EXTENSION_UUID not in st.get_strv("enabled-extensions"):
+        return "没有装过 GNOME 扩展，不用撤销。"
+    enabled = [u for u in st.get_strv("enabled-extensions") if u != EXTENSION_UUID]
+    disabled = [u for u in st.get_strv("disabled-extensions") if u != EXTENSION_UUID]
+    if install:
+        src = extension_src()
+        if not (src / "metadata.json").exists():
+            raise RuntimeError(f"没找到扩展文件夹：{src}\n请用完整的安装包重新安装 {store.APP_NAME}。")
+        tmp = dst.with_name(dst.name + ".new")
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        shutil.copytree(src, tmp)
+        if dst.exists():
+            shutil.rmtree(dst)
+        os.replace(tmp, dst)
+        enabled.append(EXTENSION_UUID)
+    else:
+        if dst.exists():
+            shutil.rmtree(dst)
+    st.set_strv("enabled-extensions", enabled)
+    st.set_strv("disabled-extensions", disabled)
+    Gio.Settings.sync()
+    if install:
+        return ("已装好 GNOME 扩展。\n\n注销电脑、重新登录后生效（是 Ubuntu 的登录，Claude 账号不受影响）。"
+                "生效后，在「多开」里把她改成待在「Claude 窗口里」。" + f"\n\n装在：{dst}")
+    return "已撤销 GNOME 扩展。注销重新登录后完全卸掉；在那之前她已经待在桌面上了。"
+
+
+def integrations(extension_running=False):
     plugin, mcp = plugin_installed(), mcp_installed()
-    return [
+    rows = [
         {"id": "plugin", "label": "Claude Code 插件", "installed": plugin,
          "note": "Code 会话的工作状态和额度；会话开始时叫她出来。新开的会话生效",
          "detail": seen_text() if plugin else None},
         {"id": "mcp", "label": "Claude 桌面端（MCP）", "installed": mcp,
          "note": "Claude 一打开就叫她出来，只用对话时也在（对话里没有工作状态）。重开 Claude 生效"},
     ]
+    if gnome_session():
+        installed = extension_installed()
+        rows.append({
+            "id": "gnome", "label": "GNOME 扩展（跟着 Claude 窗口）", "installed": installed,
+            "note": "Wayland 下她自己看不到 Claude 的窗口，要这个扩展告诉她。接入后注销电脑、重新登录一次生效（不是 Claude 账号）",
+            "detail": "正在运行：可以在「多开」里让她待在 Claude 窗口里" if extension_running
+            else "已装好，注销电脑、重新登录后生效" if installed else None,
+        })
+    return rows
 
 
 # ---------------- Claude 桌面端进程 ----------------
