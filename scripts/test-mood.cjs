@@ -47,10 +47,23 @@ const {pathToFileURL}=require('url');
     assert.equal(await page.evaluate(()=>pose),'idle','hidden pet consumed its pending reaction');
     await page.evaluate(()=>setPageHidden(false));await page.waitForFunction(()=>pose==='redhot');
     await reset();await shake();await page.evaluate(()=>{setMotionActive(false);handleClick('pat')});await page.waitForFunction(()=>pose==='puffed');
-    await reset();await page.evaluate(()=>setSessions('claude',{a:{pose:'reading',event:'PreToolUse',ts:Date.now()/1000},b:{pose:'writing',event:'PreToolUse',ts:Date.now()/1000}}));
+    await reset();
+    assert.deepEqual(await page.evaluate(()=>{
+      const ts=Date.now()/1000;
+      setSessions('claude',{a:{pose:'reading',event:'PreToolUse',ts},b:{pose:'idle',event:'SessionStart',ts:ts-5}});
+      setSessionStates('claude',[
+        {sid:'b',pose:'writing',event:'PreToolUse',ts},
+        {sid:'expired',pose:'asking',event:'Notification',ts:ts-601},
+        {sid:'b',pose:'idle',event:'SessionStart',ts:ts-4},
+      ]);
+      return Object.entries(currentSessions()).map(([id,state])=>[id,state.pose]);
+    }),[['a','reading'],['b','writing']]);
     await shake();await page.evaluate(()=>setMotionActive(false));await page.waitForTimeout(1200);
     assert.equal(await page.evaluate(()=>!!multi),true);assert.equal(await page.evaluate(()=>motionMood.pending),true);
-    await page.evaluate(()=>setSessions('claude',{}));await page.waitForFunction(()=>pose==='redhot');
+    await page.evaluate(()=>{
+      setSessionStates('claude',[{sid:'b',pose:'idle',event:'SessionStart',ts:Date.now()/1000}]);
+      setSessions('claude',{});
+    });await page.waitForFunction(()=>pose==='redhot');
     // ---- Edge hits (tumble.js): rolls[0] decides whether it triggers, rolls[1] picks fallen (<.6) or stagger ----
     await page.evaluate(()=>{const keep=setPose;window.setPose=(p,i)=>{if(p!==pose)(window.seen||=[]).push(p);return keep(p,i)};});
     async function hit(edge,rolls=[0,0]) {

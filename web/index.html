@@ -227,6 +227,7 @@ addEventListener('unhandledrejection', e => window.chrome?.webview?.postMessage(
 <script src="click-sequence.js"></script>
 <script src="motion-mood.js"></script>
 <script src="tumble.js"></script>
+<script src="sheet-player.js"></script>
 <script>
 // Claudia 画面：由 Windows 外壳（Claudia.exe）调用这几个函数
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
@@ -429,10 +430,10 @@ let animOn = true, sheet = null, sheetFront = null, sheetReleaseTimer = null
 let sheetLayoutVersion = 0
 new ResizeObserver(() => {
   ++sheetLayoutVersion
-  if (!pageHidden) sheetDraw()
+  if (!pageHidden) { upgradeScaledSheet(); sheetDraw() }
 }).observe($('body'))
 addEventListener('resize', () => {
-  if (!pageHidden && sheet?.img && sheet.dpr !== devicePixelRatio) sheetDraw()
+  if (!pageHidden && sheet?.img && sheet.dpr !== devicePixelRatio) { upgradeScaledSheet(); sheetDraw() }
 })
 function anim(p) {
   const c = char(), a = c?.animations?.[p]
@@ -446,187 +447,9 @@ function transientMs(p) {
   const clip = a.ms || Math.round(((a.to ?? SHEET.frames - 1) - (a.from ?? 0) + 1) / SHEET.fps * 1000) + 150
   return Math.max(base || 0, clip)
 }
-function sheetPlace(cv, dpr) {
-  const b = $('body'), S = b.offsetHeight * 638 / 640 / SHEET.charH   // 静态待机立绘里人物约占立绘高的 638/640
-  const w = SHEET.w * S, h = SHEET.h * S
-  cv.style.width = w + 'px'; cv.style.height = h + 'px'
-  cv.style.left = (b.offsetWidth / 2 - SHEET.centerX * S) + 'px'
-  cv.style.top = (b.offsetHeight - SHEET.feetY * S) + 'px'
-  const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr))
-  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H }
-}
-function sheetDraw(s = sheet) {
-  if (!s?.img) return
-  const dpr = window.devicePixelRatio || 1
-  if (s.layoutVersion !== sheetLayoutVersion || s.dpr !== dpr) {
-    sheetPlace(s.canvas, dpr)
-    s.layoutVersion = sheetLayoutVersion
-    s.dpr = dpr
-  }
-  const ctx = s.canvas.getContext('2d'), c = s.frame % SHEET.cols, r = Math.floor(s.frame / SHEET.cols)
-  ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(s.img, c * SHEET.w, r * SHEET.h, SHEET.w, SHEET.h, 0, 0, s.canvas.width, s.canvas.height)
-}
-function sheetCanAdvance(s) {
-  return !!s?.img && (s.frame < s.to || !!s.hold || s.loop || !!s.cycle && s.frame >= s.cycle[1])
-}
-function sheetStep(s) {
-  if (s.holding) {   // 来回播，没有接缝
-    if (s.frame >= s.hold[1]) s.dir = -1; else if (s.frame <= s.hold[0]) s.dir = 1
-    s.frame += s.dir
-  } else if (s.cycle && s.frame >= s.cycle[1]) s.frame = s.cycle[0]   // 走路的步伐循环
-  else if (s.frame < s.to) s.frame++
-  else if (s.hold) { s.holding = true; s.dir = -1; s.frame-- }
-  else s.frame = s.from
-}
-function sheetTick() {
-  const s = sheet
-  if (pageHidden || !sheetCanAdvance(s)) return
-  auraPulse()   // 和这一帧一起出，不多出一帧
-  sheetStep(s)
-  sheetDraw()
-  if (s.cycle && !s.cycled && s.frame >= s.cycle[0]) { s.cycled = true; s.onCycle?.() }   // 起步动作演完、开始迈步
-  if (sheet === s && !sheetCanAdvance(s)) updateAnimationTimers()
-}
-// still：这个姿态的静态图。动画淡入、静态图淡出之后，把底下藏着的静态图换成它，动画停下时露出来的是对的那张
-// a.keepUrl：接着演正在播的这一张（走路收尾、离场动作），不另抽一张
-function playSheet(a, still, key = null) {
-  const from = a.from ?? 0
-  const url = a.keepUrl && sheet?.url && a.urls.includes(sheet.url) ? sheet.url : pick(a.urls)
-  const s = { key, url, from, to: a.to ?? SHEET.frames - 1, hold: a.hold, loop: !!a.loop, cycle: a.cycle, cycled: false, onCycle: null,
-    frame: from, dir: 1, holding: false,
-    canvas: sheetCanvases.find(c => c !== sheetFront), img: null, timer: null }
-  // 还是正在播的这张图（已经解码好）：沿用这块画布和这份图，直接跳到新的起点接着播。
-  // 原来每次都重新读、重新解码（约 0.3 秒，画面停在半路）再交叉淡入，走路收尾、睡醒、收起零食、点击重播时看着是卡一下、叠个重影再换掉（2026-11-07 用户反馈向左跑收尾生硬）
-  const prev = sheet
-  if (prev?.img && prev.url === url && prev.key === key && sheetFront === prev.canvas) {
-    clearInterval(prev.timer); prev.cancelLoad?.()
-    Object.assign(s, { canvas: prev.canvas, img: prev.img, layoutVersion: prev.layoutVersion, dpr: prev.dpr })
-    prev.img = null   // 交给新的这份，别在 disposeSheet 里关掉
-    sheet = s
-    clearTimeout(sheetReleaseTimer)
-    sheetDraw()
-    updateAnimationTimers()
-    if (still) setTimeout(() => { if (sheet === s) showImage(still, true) }, 450)
-    return
-  }
-  // 换成另一张图：新图解码（约 0.3 秒）和交叉淡入的这段时间，旧动画接着往下播（原来停在半路不动，换动作时先定格一下）
-  if (prev?.img && sheetFront === prev.canvas) fadeOut(prev)
-  else disposeSheet()
-  if (fading && fading.canvas === s.canvas) endFade()   // 新图要画到这块画布上：淡出的那个先停
-  sheet = s
-  updateAnimationTimers()
-  clearTimeout(sheetReleaseTimer)
-  s.cancelLoad = loadSheet(s.url, img => {
-    if (sheet !== s) { img.close?.(); return }
-    s.cancelLoad = null
-    s.img = img
-    sheetDraw()
-    const old = sheetFront
-    s.canvas.classList.add('on'); if (old && old !== s.canvas) old.classList.remove('on')
-    sheetFront = s.canvas
-    document.documentElement.classList.add('sheet-on')
-    updateAnimationTimers()
-    if (still) setTimeout(() => { if (sheet === s) showImage(still, true) }, 450)
-    if (old && old !== s.canvas) setTimeout(() => { if (sheetFront !== old) { endFade(old); old.width = 1; old.height = 1 } }, 450)   // 淡出后放掉旧画布
-    setTimeout(() => { if (fading && fading.canvas !== sheetFront) endFade() }, 450)   // 不管从哪来的，淡出完就停
-  }, () => {
-    if (sheet !== s) return
-    window.chrome?.webview?.postMessage({ imageError: s.url })
-    // 读不到：不退回静态立绘，改播待机动画（只试一次，待机本身也读不到就停在原来的画面）
-    const idle = !s.fallback && anim('idle')
-    if (idle && idle.urls.some(u => u !== s.url)) { const k = { ...idle, urls: idle.urls.filter(u => u !== s.url) }; playSheet(k, null); sheet.fallback = true; return }
-    stopSheet()
-  })
-}
-// 读一张精灵图交给 done（ImageBitmap 或 <img>，都能 drawImage）；读不到调 fail。
-// 每张 5120×5400，解码一张约 0.3 秒：用 <img> 时解码发生在第一次画上画布的时候，网页帧循环整个停住约 0.3 秒
-// （实测 290–345 ms，拖动起步换「被拎起来」时会顿一下）。先 fetch 成 Blob 再 createImageBitmap，解码在后台线程，
-// 主线程只剩第一次画时约 75 ms 的上传（2026-11-06）。画出来的像素一样。
-// 拿不到时退回 <img>：测试里的 file:// 地址、读失败、4 秒还没解完（页面在后台时解码可能一直不返回，所以 <img> 也只用 onload 不用 decode()）
-function loadSheet(url, done, fail) {
-  const controller = new AbortController()
-  const { signal } = controller
-  let timer = null, img = null, blob = null, objectUrl = null
-  const releaseUrl = () => {
-    if (objectUrl) URL.revokeObjectURL(objectUrl)
-    objectUrl = null
-  }
-  const viaImg = () => {
-    if (signal.aborted) return
-    clearTimeout(timer)
-    controller.abort()
-    if (blob) objectUrl = URL.createObjectURL(blob)
-    blob = null
-    img = new Image()
-    img.onload = () => { releaseUrl(); done(img) }
-    img.onerror = () => { releaseUrl(); fail() }
-    img.src = objectUrl || url
-  }
-  if (window.createImageBitmap && /^https:/.test(url)) {
-    timer = setTimeout(viaImg, 4000)
-    fetch(url, { signal })
-      .then(r => {
-        if (!r.ok) throw new Error(r.status)
-        return r.blob()
-      })
-      .then(data => {
-        if (signal.aborted) return
-        blob = data
-        return createImageBitmap(data)
-      })
-      .then(bitmap => {
-        clearTimeout(timer)
-        if (!bitmap) return
-        if (signal.aborted) bitmap.close()
-        else done(bitmap)
-      }, viaImg)
-  } else viaImg()
-  return () => {
-    clearTimeout(timer)
-    controller.abort()
-    if (img) {
-      img.onload = img.onerror = null
-      img.removeAttribute('src')
-    }
-    releaseUrl()
-  }
-}
-// 正在淡出的旧动画：单独按 12 帧接着播，淡出完（或者又换了别的）再停、放掉它的图
-let fading = null
-function fadeOut(s) {
-  endFade()
-  clearInterval(s.timer); s.timer = null; s.cancelLoad?.()
-  fading = s
-  s.fadeTimer = setInterval(() => { if (!pageHidden && sheetCanAdvance(s)) { sheetStep(s); sheetDraw(s) } }, 1000 / SHEET.fps)
-}
-function endFade(canvas = null) {
-  const f = fading
-  if (!f || (canvas && f.canvas !== canvas)) return
-  fading = null; clearInterval(f.fadeTimer); f.img?.close?.(); f.img = null
-}
-function disposeSheet() {
-  if (!sheet) return
-  clearInterval(sheet.timer)
-  sheet.cancelLoad?.()
-  sheet.img?.close?.()
-  sheet = null
-}
-function stopSheet() {
-  if (sheet?.img && sheetFront === sheet.canvas) { fadeOut(sheet); sheet = null }   // 淡出时接着播，不停在半路
-  else disposeSheet()
-  updateAnimationTimers()
-  if (!sheetFront && !document.documentElement.classList.contains('sheet-on')) return
-  for (const c of sheetCanvases) c.classList.remove('on')
-  sheetFront = null
-  document.documentElement.classList.remove('sheet-on')
-  clearTimeout(sheetReleaseTimer)
-  sheetReleaseTimer = setTimeout(() => { if (!sheet) { endFade(); for (const c of sheetCanvases) { c.width = 1; c.height = 1 } } }, 450)
-}
 // 设置变了：当前姿态按新规则重画一次
 function refreshAnim() { const p = pose; if (!p || multi || farewellLine !== null) return; pose = null; setPose(p, true) }
-REDUCED_MOTION.addEventListener?.('change', refreshAnim)
+REDUCED_MOTION.addEventListener?.('change', () => { if (!sheet) refreshAnim() })
 // 拖着她时播「被拎起来」（不换姿态，只盖一层动画）；被甩出火气、赌气、碰边、道别、多会话时照旧
 const NO_DRAG_SHEET = new Set(['annoyed', 'puffed', 'redhot', 'sulk', 'dizzy'])
 function dragSheet(m) {
@@ -1064,9 +887,10 @@ function watchStuck() {
 // - 窗口看不见（被挡住、锁屏、屏幕休眠）：外壳调 setPageHidden(true)，全部暂停
 const RESTING = new Set(['idle', 'tired', 'sleeping'])
 let fxResting = false, pageHidden = false, fxClock = null, fxFps = 0, restTimer = null
+let fxNodes = []
 function fxTick() {
   const now = performance.now()
-  for (const s of document.querySelectorAll('#fx svg, #cards svg')) {
+  for (const s of fxNodes) {
     if (s._fxT === undefined) { s.pauseAnimations(); s._fxT = s.getCurrentTime(); s._fxS = now }
     else if (!s.animationsPaused()) {
       // 窗口藏起来再露出来时，重新核对 SVG 动画的暂停状态：
@@ -1079,18 +903,19 @@ function fxTick() {
   }
 }
 function applyFxRate() {
-  const fps = pageHidden ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : 60
+  const fps = pageHidden || !fxNodes.length ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : 60
   $('fx').classList.toggle('rest', fxResting && pose !== 'sleeping' && !pageHidden)
   document.documentElement.classList.toggle('frozen', pageHidden)
   if (fps === fxFps && (fps === 0 || fxClock)) return
   // 停过表（藏起来、闲着歇了）再开：从停下时的那一帧接着走，不一下子跳过停着的那段
-  if (fxFps <= 0 && fps > 0) { const now = performance.now(); for (const s of document.querySelectorAll('#fx svg, #cards svg')) if (s._fxLast !== undefined) { s._fxT = s._fxLast; s._fxS = now } }
+  if (fxFps <= 0 && fps > 0) { const now = performance.now(); for (const s of fxNodes) if (s._fxLast !== undefined) { s._fxT = s._fxLast; s._fxS = now } }
   fxFps = fps
   clearInterval(fxClock); fxClock = null
-  fxTick()   // 新出现的先接管（停住自己的时钟）
+  if (fxRaf) { cancelAnimationFrame(fxRaf); fxRaf = 0 }
   if (fps > 0) {
     // 跟着屏幕刷新出帧（隔几帧出一帧），节拍均匀；单用定时器和屏幕刷新对不齐，一帧停得长一帧停得短，移动的文字、画笔看着一抖一抖
-    if (!fxRaf) fxRaf = requestAnimationFrame(fxLoop)
+    fxTick()
+    fxRaf = requestAnimationFrame(fxLoop)
     // 兜底：窗口在后台、刚从全屏回来时 requestAnimationFrame 可能不触发，这时按定时器走
     fxClock = setInterval(() => {
       if (performance.now() - fxLast > 250) { fxLast = performance.now(); fxTick(); if (!fxRaf) fxRaf = requestAnimationFrame(fxLoop) }
@@ -1104,8 +929,12 @@ function fxLoop(t) {
   if (t - fxLast >= 1000 / fxFps - 4) { fxLast = t; fxTick() }
   fxRaf = requestAnimationFrame(fxLoop)
 }
-// 新画上去的特效马上接管，别先按 60 帧跑一下
-new MutationObserver(() => fxTick()).observe(document.getElementById('stage'), { childList: true, subtree: true })
+const fxObserver = new MutationObserver(() => {
+  fxNodes = [...document.querySelectorAll('#fx svg, #cards svg')]
+  for (const s of fxNodes) if (s._fxT === undefined) s.pauseAnimations()
+  applyFxRate()
+})
+for (const id of ['fx', 'cards']) fxObserver.observe($(id), { childList: true, subtree: true })
 function noteRest(p) {
   clearTimeout(restTimer)
   if (fxResting) { fxResting = false; applyFxRate() }
@@ -1146,17 +975,18 @@ function setPageHidden(h) {
   if (pageHidden) { stopWalk(); clickSequence.cancel() }
   motionMood.setHidden(pageHidden)
   applyFxRate()
-  if (wasHidden && !pageHidden) sheetDraw()
+  if (wasHidden && !pageHidden) { upgradeScaledSheet(); sheetDraw() }
   updateAnimationTimers()
   scheduleHitRects()
 }
 applyFxRate()
 
 // ---- 多会话：同一个 AI 好几个对话同时在干活 ----
-// 外壳把 <角色>-sessions.json（{会话id: {pose, event, ts}}）交过来。两个以上同时在干活时她「手忙脚乱」：
+// 外壳把新插件的独立会话状态和旧插件的聚合状态交过来。两个以上同时在干活时她「手忙脚乱」：
 // 左右两帧来回切（busy_left / busy_right；三个以上换更崩溃的 swamped_*），每个对话一张小卡片演它正在做的事，
 // 她转向哪边，哪边的卡片就亮。干完的卡片打绿勾、出错的变红抖一下，停几秒后消失；有对话在等你回答时她换成「等你回答」
-const sessions = {}         // 角色 → {会话id: {pose, event, ts}}
+const sessions = {}         // 旧插件的聚合状态
+const sessionStates = new Map()      // 角色 → Map(会话 ID → 新插件的状态)
 const SESSION_DONE_SHOW = 4  // 干完 / 出错的卡片停几秒
 const SESSION_FLIP = 1500    // 左右两帧多久换一次
 let multi = null             // 正在演：{ side, flipTimer, cards: Map(会话id → {el, pose, shownAt, pending}), order: [会话id] }
@@ -1164,6 +994,16 @@ let multi = null             // 正在演：{ side, flipTimer, cards: Map(会话
 function setSessions(id, map) {
   if (id === 'current') id = charId
   sessions[id] = map || {}
+  refreshMulti()
+}
+function setSessionStates(id, updates) {
+  if (!sessionStates.has(id)) sessionStates.set(id, new Map())
+  const states = sessionStates.get(id)
+  for (const state of updates) {
+    if (typeof state.sid !== 'string' || !state.sid || typeof state.pose !== 'string' || !Number.isFinite(state.ts)) continue
+    const previous = states.get(state.sid)
+    if (!previous || previous.ts <= state.ts) states.set(state.sid, state)
+  }
   refreshMulti()
 }
 function sessionKind(e, now) {
@@ -1174,11 +1014,15 @@ function sessionKind(e, now) {
   if (e.pose === 'idle' || e.pose === 'sleeping') return null
   return age < STUCK_AFTER / 1000 ? 'work' : null   // 一轮中途某个工具出错：还在干活，只是卡片变红
 }
-// 当前角色要演的会话：她自己的，加上她响应的各家 AI 的（会话 id 各家不重复，直接合在一起）
 function currentSessions() {
-  const out = { ...(sessions[charId] || {}) }
-  for (const [host, map] of Object.entries(sessions)) if (host === charId) Object.assign(out, map)
-  return out
+  const out = new Map(Object.entries(sessions[charId] || {}))
+  const states = sessionStates.get(charId)
+  const cutoff = Date.now() / 1000 - 600
+  for (const [sid, state] of states || []) {
+    if (state.ts < cutoff) states.delete(sid)
+    else if (!out.has(sid) || !(Number(out.get(sid)?.ts) > state.ts)) out.set(sid, state)
+  }
+  return Object.fromEntries(out)
 }
 function refreshMulti() {
   const map = currentSessions(), now = Date.now() / 1000

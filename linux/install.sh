@@ -37,14 +37,30 @@ if ! python3 -I -c 'import gi; gi.require_version("AyatanaAppIndicator3", "0.1")
   echo "提示：没有托盘图标。想要的话装：sudo apt install gir1.2-ayatanaappindicator3-0.1"
 fi
 
-# ---- 先停掉正在跑的 ----
-if [ -x "$BIN/claudia-pet" ]; then "$BIN/claudia-pet" --quit >/dev/null 2>&1 || true; sleep 1; fi
-pkill -f "^python3 -I $DST/linux/claudia/main.py" 2>/dev/null || true
-
 # ---- 复制 ----
-mkdir -p "$DST" "$BIN" "$APPS"
-TMP="$DST.new"
-rm -rf "$TMP"
+mkdir -p "$(dirname "$DST")" "$BIN" "$APPS"
+exec 9>"$DST.install.lock"
+if ! flock -n 9; then
+  echo "已有一个 claudia-pet 安装任务在运行。" >&2
+  exit 1
+fi
+OLD="$DST.old"
+for dir in "$DST" "$OLD"; do
+  if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -x "$dir/linux/claudia-pet" ]; }; then
+    echo "安装路径不是 claudia-pet 安装目录：$dir" >&2
+    exit 1
+  fi
+done
+if [ -d "$OLD" ] && [ ! -d "$DST" ]; then mv "$OLD" "$DST"; fi
+TMP=$(mktemp -d "$DST.new.XXXXXXXX")
+promoted=0
+cleanup() {
+  if [ "$promoted" = 1 ] && [ -d "$OLD" ]; then mv "$DST" "$TMP"; fi
+  if [ ! -e "$DST" ] && [ -d "$OLD" ]; then mv "$OLD" "$DST"; fi
+  if [ -d "$TMP" ]; then rm -rf -- "$TMP"; fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 mkdir -p "$TMP/linux" "$TMP/icon"
 cp -rp "$SRC/web" "$SRC/characters" "$SRC/plugin" "$TMP/"
 cp -p "$SRC/VERSION" "$SRC/LICENSE" "$SRC/NOTICE.md" "$TMP/"
@@ -54,10 +70,37 @@ cp -rp "$SRC/linux/gnome-extension" "$TMP/linux/"
 cp "$SRC/linux/claudia-pet" "$SRC/linux/uninstall.sh" "$TMP/linux/"
 find "$TMP" -name __pycache__ -type d -prune -exec rm -rf {} +
 chmod +x "$TMP/linux/claudia-pet" "$TMP/linux/uninstall.sh"
-rm -rf "$DST.old"
-[ -d "$DST" ] && mv "$DST" "$DST.old"
+
+# 只请桌宠退出。MCP 使用同一程序入口，但不持有桌宠的实例锁。
+if [ -x "$DST/linux/claudia-pet" ]; then "$DST/linux/claudia-pet" --quit >/dev/null 2>&1 || true; fi
+python3 -I - "${CLAUDIA_DATA_DIR:-$HOME/.claudia}/run" <<'PY'
+import fcntl
+import sys
+import time
+from pathlib import Path
+
+run = Path(sys.argv[1])
+
+def busy(lock):
+    try:
+        with lock.open("rb") as file:
+            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except FileNotFoundError:
+        return False
+    except BlockingIOError:
+        return True
+    return False
+
+deadline = time.monotonic() + 12
+while any(busy(lock) for lock in run.glob("*.lock")):
+    if time.monotonic() >= deadline:
+        sys.exit("桌宠还在运行，安装目录未替换。")
+    time.sleep(.15)
+PY
+if [ -d "$OLD" ]; then rm -rf -- "$OLD"; fi
+if [ -d "$DST" ]; then mv "$DST" "$OLD"; fi
 mv "$TMP" "$DST"
-rm -rf "$DST.old"
+promoted=1
 ln -sf "$DST/linux/claudia-pet" "$BIN/claudia-pet"
 
 cat > "$APPS/claudia-pet.desktop" <<EOF
@@ -71,6 +114,12 @@ Terminal=false
 Categories=Utility;
 StartupWMClass=claudia-pet
 EOF
+if [ ! -x "$DST/linux/claudia-pet" ] || [ ! -f "$DST/web/index.html" ]; then
+  echo "安装文件不完整。" >&2
+  exit 1
+fi
+promoted=0
+if [ -d "$OLD" ]; then rm -rf -- "$OLD"; fi
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" 2>/dev/null || true
 echo "已安装到 $DST"
 
@@ -91,6 +140,6 @@ case "${XDG_CURRENT_DESKTOP:-}" in
     fi ;;
 esac
 if [ "$START" = 1 ]; then
-  setsid "$BIN/claudia-pet" >/dev/null 2>&1 < /dev/null &
+  setsid "$BIN/claudia-pet" 9>&- >/dev/null 2>&1 < /dev/null &
   echo "claudia-pet 已经打开。"
 fi

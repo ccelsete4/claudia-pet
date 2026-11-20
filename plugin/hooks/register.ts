@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 // Claudia × Claude Code
 // 把会话里发生的事写成几个小文件，Claudia（桌宠）每 0.3 秒读一次：
 //   claude-state.json     现在在干什么（听你说、思考、读文件、跑命令、完成、出错、等你回答……）
-//   claude-sessions.json  好几个会话同时干活时，各自在干什么
+//   claude-session-*.json  每个会话独立写自己的状态
 //   claude-quota.json     5 小时 / 每周额度（session.measure 推来的）
 // 会话开始、你发消息时顺便看一眼桌宠在不在，不在就叫她出来（交给 claudia-pet.exe --ensure，见 app/src/Ensure.cs）。
 // 只写本机的状态文件，不改 Claude 的行为，出错也不影响会话。改自 CrossPet 的 Claude Code mod（MIT）。
@@ -33,16 +33,11 @@ async function setState($: EngineInterface, state: State): Promise<void> {
     await write($, 'seen-plugin', String(Math.floor(Date.now() / 1000)))   // 心跳：设置页显示「上次收到消息」
     let sid = ''
     try { sid = await $.session.id() } catch {}
-    await write($, 'claude-state.json', { ...state, sid, noticeV: 1 })
-    const d = await stateDir($)
-    if (!d) return
-    const file = `${d}${sep}claude-sessions.json`
-    let known: Record<string, { pose: string; event: string; ts: number }> = {}
-    try { known = JSON.parse(await $.fs.read(file)) } catch {}
-    known[sid] = { pose: state.pose, event: state.event, ts: state.ts }
-    const now = Date.now() / 1000
-    for (const k of Object.keys(known)) if (now - known[k].ts > 600) delete known[k]
-    await $.fs.write(file, JSON.stringify(known))
+    const { pose, event, ts } = state
+    await Promise.allSettled([
+      write($, 'claude-state.json', { ...state, sid, noticeV: 1 }),
+      sid && write($, `claude-session-${encodeURIComponent(sid)}.json`, { sid, pose, event, ts }),
+    ])
   } catch {}   // 写不了就算了：不能影响 Claude
 }
 

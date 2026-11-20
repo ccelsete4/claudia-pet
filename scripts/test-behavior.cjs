@@ -73,5 +73,18 @@ assert.ok(idle.delay(idle.normalize({idleFrequency:'lively'}), .5) < idle.delay(
   for(let i=0;i<40;i++) await send('turn.complete',{ reason:'answer' });
   assert.ok([...files].filter(([p])=>p.includes('claude-notify-')).every(([,s])=>JSON.parse(s).events.length<=32));
   assert.equal(JSON.parse(files.get('TEST-HOME\\.claudia\\state\\claude-state.json')).noticeV,1);
-  console.log('PASS: idle controls/interruptions; real plugin notification hooks, per-session queues and bounded retention');
+  const prefix = 'TEST-HOME\\.claudia\\state\\';
+  const legacy = JSON.stringify({ legacy: { pose:'reading', event:'PreToolUse', ts:Date.now()/1000 } });
+  files.set(prefix + 'claude-sessions.json', legacy);
+  await Promise.all(['concurrent-a', 'concurrent/b'].map(id => {
+    const sessionEngine = {...engine, session:{id:async () => id}};
+    return handlers['prompt.submit'](sessionEngine, {}, async e => e);
+  }));
+  for (const id of ['concurrent-a', 'concurrent/b']) {
+    const record = JSON.parse(files.get(prefix + 'claude-session-' + encodeURIComponent(id) + '.json'));
+    assert.equal(record.sid, id);
+    assert.equal(record.pose, 'listening');
+  }
+  assert.equal(files.get(prefix + 'claude-sessions.json'), legacy, 'new writers must leave legacy sessions intact');
+  console.log('PASS: idle controls, notification queues and retention, independent writes from concurrent sessions');
 })().catch(e=>{console.error(e); process.exitCode=1;});

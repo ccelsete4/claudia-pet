@@ -1,6 +1,6 @@
 # 动画动作来源
 
-本文件夹里的精灵图来自 claude-pet 动作包，原样复制，没有改动或重新编码。
+下列上游原图来自 claude-pet 动作包，按原文件保存。
 
 - 作者：hunmer
 - 来源：[hunmer/aboutme-pets](https://github.com/hunmer/aboutme-pets)（`pets/claude` 动作包，`spritesheet/` 目录）
@@ -87,3 +87,7 @@
 | 小侦探-放大镜.webp | detective 小侦探（闲置随机，玩耍组，不限时段，96 帧演满） | 同上，Seedance 2.0 480p 8 秒：魔法变出放大镜、书飘到肩旁，左右探着找、凑到眼前瞄，最后点头、放大镜化光散掉。本来是给「查资料」做的第 2 版，像找东西不像查资料，改作随机动作。超分 2 倍 + 逐帧 Lab 校色。SHA-256 前 16 位 `95b5c17383024a2f` |
 
 以作者的帧为基础生成，按 CC BY-NC-SA 4.0，署名 hunmer（基础帧）和 claudia-pet。
+
+### 缩小版精灵图
+
+待机呼吸、被拖起和原地小憩另附 `.scaled.webp`。它们用 `scripts/prepare-scaled-sheets.py` 把原精灵图的每帧缩到 448×252，保留原帧顺序、透明背景及来源和许可。渲染尺寸超过缩小版时使用原图。

@@ -58,6 +58,17 @@ function manifest() {
     await page.evaluate(() => { pose = null; setPose('idle', true) }); await waitSheet()
     let s = await state()
     assert.equal(s.url, '待机呼吸休闲.webp'); assert.ok(s.on && s.front); assert.equal(s.bodyClass, '')
+    assert.equal(await page.evaluate(() => sheet.img.width), 3584, 'normal-size idle should decode the scaled sheet')
+    await page.waitForFunction(() => !$('fx').querySelector('svg') && fxFps === 0 && !fxClock && !fxRaf, null, { timeout: 4000 })
+
+    await page.evaluate(() => { $('fx').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>' })
+    await page.waitForFunction(() => fxFps === 60)
+    await page.evaluate(() => setPageHidden(true))
+    assert.equal(await page.evaluate(() => fxFps), 0, 'hidden effects should pause')
+    await page.evaluate(() => setPageHidden(false))
+    await page.waitForFunction(() => fxFps === 60)
+    await page.evaluate(() => { $('fx').innerHTML = '' })
+    await page.waitForFunction(() => fxFps === 0 && !fxClock && !fxRaf)
 
     // 对齐：精灵图里的脚底（第 321 行）落在人物框底边，中线（第 325 列）落在人物框中间，人物高和静态立绘一样
     const place = await page.evaluate(() => {
@@ -82,7 +93,7 @@ function manifest() {
       $('body').style.height = '85%'
       return sheetFront.width
     })
-    await page.waitForFunction(width => sheetFront.width > width, normalWidth)
+    await page.waitForFunction(width => sheetFront.width > width && sheet?.img?.width === 5120, normalWidth)
     await page.evaluate(() => { $('body').style.height = '' })
     await page.waitForFunction(width => sheetFront.width === width, normalWidth)
 
@@ -216,7 +227,11 @@ function manifest() {
 
     // 拖着她：盖一层「被拎起来」，松手后回到原来的常态动画；被甩出火气后不盖
     await page.evaluate(() => { pose = null; setPose('idle', true) }); await waitSheet()
-    await page.evaluate(() => dragSheet({ phase: 'drag' })); await page.waitForFunction(() => sheet?.key === 'drag' && sheet.img)
+    await page.evaluate(() => {
+      dragSheet({ phase: 'drag' })
+      REDUCED_MOTION.dispatchEvent(new Event('change'))
+    })
+    await page.waitForFunction(() => sheet?.key === 'drag' && sheet.img)
     assert.equal((await state()).url, '被鼠标拖拽悬空反馈.webp')
     // 松手（原地放下）：动画一直盖着，不露出静态立绘
     const gap = await page.evaluate(async () => {

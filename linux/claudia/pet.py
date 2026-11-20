@@ -20,7 +20,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from . import actions, claude, store, system, web, xshape  # noqa: E402
 from .claude_window import ClaudeWindowWatch  # noqa: E402
-from .notices import TaskNoticePolicy  # noqa: E402
+from .notices import TaskNoticePolicy, legacy_notice, pending_notices  # noqa: E402
 
 BASE_W, BASE_H = 260, 362
 STAGGER_X = 190
@@ -328,82 +328,52 @@ class Pet:
         if not self.ready:
             return
         cid = "claude"
+        cutoff = time.time() - 600
         for kind in ("state", "quota", "sessions"):
             f = store.STATE / f"{cid}-{kind}.json"
-            try:
-                st = f.stat()
-            except OSError:
+            result = store.changed_state(
+                f, self.stamps, max_bytes=1_000_000, not_before=cutoff if kind == "state" else None,
+            )
+            if result is None:
                 continue
-            if st.st_size > 1_000_000:
-                continue
-            stamp = f"{st.st_mtime_ns}:{st.st_size}"
-            key = f"{cid}-{kind}"
-            if self.stamps.get(key) == stamp:
-                continue
-            if kind == "state" and time.time() - st.st_mtime > 600:   # 只认 10 分钟内的
-                self.stamps[key] = stamp
-                continue
-            value = store.read_json(f)
-            if value is None:
-                continue   # 可能正被另一边写一半，下次再读
-            self.stamps[key] = stamp
+            value, modified = result
             data = store.dumps(value)
             if kind == "sessions":
                 self.js(f"setSessions({store.dumps(cid)}, {data})")
             elif kind == "state":
-                self.notice_from_state(value)
+                notice = legacy_notice(value)
+                if notice:
+                    self.task_notice(*notice)
                 self.js(f"applyCharState({store.dumps(cid)}, {data})")
             else:
-                self.js(f"setQuota({store.dumps(cid)}, {data}, {int(st.st_mtime)})")
-        self.poll_task_notices()
+                self.js(f"setQuota({store.dumps(cid)}, {data}, {int(modified)})")
+        self.poll_session_states(cid, cutoff)
+        if store.is_main():
+            for notice in pending_notices(self.stamps):
+                self.task_notice(*notice)
+
+    def poll_session_states(self, cid, cutoff):
+        changed = []
+        for f in store.STATE.glob("claude-session-*.json"):
+            result = store.changed_state(f, self.stamps, max_bytes=65536, not_before=cutoff)
+            if result:
+                changed.append(result[0])
+        if changed:
+            self.js(f"setSessionStates({store.dumps(cid)}, {store.dumps(changed)})")
 
     # ---- 任务通知（只从第一只弹） ----
     def task_notice(self, nid, kind, ts):
         if not store.is_main():
             return
         enabled = store.setting_on("notifyWaiting" if kind == "waiting" else "notifyResults")
-        # Wayland 下看不到前台是哪个窗口：「仅在 Claude 不在前台时通知」按「不在前台」算
-        if not self.notices.accept(nid, kind, ts, time.time(), enabled, False, store.setting_on("notifyBackgroundOnly")):
+        window_state = self.claude_watch.state if self.claude_watch and self.claude_watch.available else None
+        foreground = bool(window_state and window_state.get("focused") is True)
+        if not self.notices.accept(nid, kind, ts, time.time(), enabled, foreground, store.setting_on("notifyBackgroundOnly")):
             return
         title = {"waiting": "Claude 需要你确认", "error": "Claude 任务出错"}.get(kind, "Claude 任务已完成")
         text = {"waiting": "有授权申请或问题等待你处理，回到 Claude 看一下吧。",
                 "error": "这一轮未能正常完成，请回到 Claude 查看。"}.get(kind, "这一轮工作已结束，可以回到 Claude 查看结果。")
         system.notify(title, text, warn=kind == "error")
-
-    def notice_from_state(self, state):
-        if "noticeV" in state or "ts" not in state:
-            return
-        pose, ev = state.get("pose"), state.get("event")
-        kind = "waiting" if pose == "asking" else "complete" if ev == "Stop" and pose in ("happy", "proud") else \
-            "error" if ev == "Stop" and pose == "oops" else None
-        if kind:
-            self.task_notice(f"state:{state['ts']}:{kind}", kind, float(state["ts"]))
-
-    def poll_task_notices(self):
-        try:
-            files = list(store.STATE.glob("claude-notify-*.json"))
-        except OSError:
-            return
-        for f in files:
-            try:
-                st = f.stat()
-            except OSError:
-                continue
-            if st.st_size > 100000 or time.time() - st.st_mtime > 120:
-                continue
-            key, stamp = "notice:" + str(f), f"{st.st_mtime_ns}:{st.st_size}"
-            if self.stamps.get(key) == stamp:
-                continue
-            data = store.read_json(f)
-            if not data or not isinstance(data.get("events"), list):
-                continue
-            self.stamps[key] = stamp
-            for e in data["events"]:
-                if isinstance(e, dict) and {"id", "kind", "ts"} <= e.keys():
-                    try:
-                        self.task_notice(str(e["id"]), str(e["kind"]), float(e["ts"]))
-                    except (TypeError, ValueError):
-                        pass
 
     # ================= 每秒一次 =================
     def tick(self):

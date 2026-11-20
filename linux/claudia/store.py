@@ -80,6 +80,26 @@ def dumps(v):
     return json.dumps(v, ensure_ascii=False)
 
 
+def changed_state(path, stamps, *, max_bytes, not_before=None):
+    """Read a changed plugin file. A partial write is retried on the next poll."""
+    try:
+        stat = path.stat()
+    except OSError:
+        stamps.pop(path, None)
+        return None
+    if stat.st_size > max_bytes or not_before is not None and stat.st_mtime < not_before:
+        stamps.pop(path, None)
+        return None
+    stamp = stat.st_mtime_ns, stat.st_size
+    if stamps.get(path) == stamp:
+        return None
+    value = read_json(path)
+    if value is None:
+        return None
+    stamps[path] = stamp
+    return value, stat.st_mtime
+
+
 pet_id = "main"
 
 
@@ -264,15 +284,28 @@ def sync_resources():
             continue
         dst = CHARACTERS / d.name
         try:
-            if _same_resources(d, dst):
-                continue
-            staged = DATA / "builtin-resource-sync" / d.name / "next"
+            work = DATA / "builtin-resource-sync" / d.name
+            staged, previous = work / "next", work / "previous"
+            if previous.exists():
+                if dst.exists():
+                    shutil.rmtree(previous)
+                else:
+                    os.replace(previous, dst)
             if staged.exists():
                 shutil.rmtree(staged)
+            if _same_resources(d, dst):
+                continue
             _copy_dir(d, staged)
             if dst.exists():
-                shutil.rmtree(dst)
-            os.replace(staged, dst)
+                os.replace(dst, previous)
+            try:
+                os.replace(staged, dst)
+            except OSError:
+                if previous.exists():
+                    os.replace(previous, dst)
+                raise
+            if previous.exists():
+                shutil.rmtree(previous)
             log("同步角色素材：" + d.name)
         except OSError as e:
             log(f"同步角色失败 {d}: {e}")

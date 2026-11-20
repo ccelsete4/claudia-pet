@@ -39,7 +39,7 @@ namespace Claudia
         {
             if (!ready) return;
             // Claudia 只有 Claude 一个角色：插件写 claude-state.json（当前动作）、claude-quota.json（额度）、
-            // claude-sessions.json（好几个 Code 会话同时干活时各自的状态）
+            // claude-sessions.json 是仍在运行的旧插件写的多会话状态。
             const string id = "claude";
             foreach (var kind in new[] { "state", "quota", "sessions" })
             {
@@ -63,8 +63,36 @@ namespace Claudia
                 }
                 else Js($"setQuota({Q(id)}, {json}, {new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeSeconds()})");   // 带上修改时间：网页据此标「多久前的数据」
             }
+            if (!Paused) PollSessionStates(id);
             PollTaskNotices();
             ApplyLayer();
+        }
+
+        void PollSessionStates(string id)
+        {
+            var cutoff = DateTime.UtcNow.AddMinutes(-10);
+            var changed = new List<Dictionary<string, object>>();
+            try
+            {
+                foreach (var file in new DirectoryInfo(Store.State).EnumerateFiles("claude-session-*.json"))
+                {
+                    var path = file.FullName;
+                    if (!file.Exists || file.LastWriteTimeUtc < cutoff || file.Length > 65536)
+                    {
+                        stamps.Remove(path);
+                        continue;
+                    }
+                    var stamp = file.LastWriteTimeUtc.Ticks + ":" + file.Length;
+                    if (stamps.TryGetValue(path, out var old) && old == stamp) continue;
+                    var state = Store.ReadJson(path);
+                    if (state == null) continue;
+                    stamps[path] = stamp;
+                    changed.Add(state);
+                }
+            }
+            catch (IOException) { }   // 下次轮询重试。
+            catch (UnauthorizedAccessException) { }
+            if (changed.Count != 0) Js($"setSessionStates({Q(id)}, {Store.Json.Serialize(changed)})");
         }
     }
 }

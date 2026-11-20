@@ -1,5 +1,8 @@
 """任务通知的去重和节流（照搬 Windows 版 app/src/TaskNoticePolicy.cs）"""
 
+import time
+
+from . import store
 
 class TaskNoticePolicy:
     def __init__(self, started_at):
@@ -24,3 +27,34 @@ class TaskNoticePolicy:
             return False
         self.shown[kind] = now
         return True
+
+
+def legacy_notice(state):
+    if "noticeV" in state or "ts" not in state:
+        return None
+    pose, ev = state.get("pose"), state.get("event")
+    kind = "waiting" if pose == "asking" else "complete" if ev == "Stop" and pose in ("happy", "proud") else \
+        "error" if ev == "Stop" and pose == "oops" else None
+    if kind:
+        try:
+            return f"state:{state['ts']}:{kind}", kind, float(state["ts"])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def pending_notices(stamps):
+    cutoff = time.time() - 120
+    for file in store.STATE.glob("claude-notify-*.json"):
+        result = store.changed_state(file, stamps, max_bytes=100000, not_before=cutoff)
+        if result is None:
+            continue
+        events = result[0].get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if isinstance(event, dict) and {"id", "kind", "ts"} <= event.keys():
+                try:
+                    yield str(event["id"]), str(event["kind"]), float(event["ts"])
+                except (TypeError, ValueError):
+                    pass
