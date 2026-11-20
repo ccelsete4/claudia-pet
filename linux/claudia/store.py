@@ -326,12 +326,19 @@ def manifest():
             if info is None:
                 continue
             poses, blink, blink_base = _sprites(d)
+            sheets = _sheets(d)
             if "idle" not in poses and "default" not in poses:
-                continue
+                animations = info.get("animations")
+                idle = animations.get("idle") if isinstance(animations, dict) else None
+                idle_sheets = idle.get("sheets") if isinstance(idle, dict) else None
+                if not isinstance(idle_sheets, list) or not any(
+                    isinstance(name, str) and name in sheets for name in idle_sheets
+                ):
+                    continue
             custom = names().get(d.name)
             if isinstance(custom, str) and custom.strip():
                 info["name"] = custom.strip()
-            info.update(poses=poses, blink=blink, blinkBase=blink_base, sheets=_sheets(d))
+            info.update(poses=poses, blink=blink, blinkBase=blink_base, sheets=sheets)
             chars[d.name] = info
     return {"characters": chars}
 

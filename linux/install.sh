@@ -1,11 +1,13 @@
 #!/bin/sh
 # 给当前用户安装 claudia-pet Linux 版（不需要 root）。
 #
-#   sh linux/install.sh [--connect] [--no-start]
+#   sh linux/install.sh [--connect] [--no-extension] [--no-start]
 #
 # 程序装到 ~/.local/share/claudia-pet，命令 ~/.local/bin/claudia-pet，应用菜单里有「claudia-pet」。
 # 设置、日志和立绘在 ~/.claudia，重装不会丢。
 # --connect 同时接入 Claude Code 插件和 Claude 桌面端（MCP）；不加的话之后在右键「设置…」→「接入 Claude」里接入。
+# GNOME 桌面上还会装一个 GNOME Shell 扩展（让她能待在 Claude 窗口里），注销电脑、重新登录一次后生效；
+# --no-extension 不装它（她就只待在桌面上）。
 # 不加开机自启：接入后由 Claude 把她叫出来。
 set -eu
 
@@ -15,10 +17,12 @@ BIN="$HOME/.local/bin"
 APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 CONNECT=0
 START=1
+EXTENSION=1
 for a in "$@"; do
   case "$a" in
     --connect) CONNECT=1 ;;
     --no-start) START=0 ;;
+    --no-extension) EXTENSION=0 ;;
     *) echo "不认识的参数：$a" >&2; exit 2 ;;
   esac
 done
@@ -46,6 +50,7 @@ cp -rp "$SRC/web" "$SRC/characters" "$SRC/plugin" "$TMP/"
 cp -p "$SRC/VERSION" "$SRC/LICENSE" "$SRC/NOTICE.md" "$TMP/"
 cp -p "$SRC/icon/AppIcon.png" "$TMP/icon/"
 cp -rp "$SRC/linux/claudia" "$TMP/linux/"
+cp -rp "$SRC/linux/gnome-extension" "$TMP/linux/"
 cp "$SRC/linux/claudia-pet" "$SRC/linux/uninstall.sh" "$TMP/linux/"
 find "$TMP" -name __pycache__ -type d -prune -exec rm -rf {} +
 chmod +x "$TMP/linux/claudia-pet" "$TMP/linux/uninstall.sh"
@@ -75,8 +80,16 @@ case ":$PATH:" in
 esac
 
 if [ "$CONNECT" = 1 ]; then
-  "$BIN/claudia-pet" --connect all
+  "$BIN/claudia-pet" --connect plugin
+  "$BIN/claudia-pet" --connect mcp
 fi
+case "${XDG_CURRENT_DESKTOP:-}" in
+  *GNOME*|*gnome*)
+    if [ "$EXTENSION" = 1 ]; then
+      "$BIN/claudia-pet" --connect gnome
+      echo "提示：跟着 Claude 窗口要用的 GNOME 扩展已经装好，注销电脑、重新登录一次后生效（不是 Claude 账号）。"
+    fi ;;
+esac
 if [ "$START" = 1 ]; then
   setsid "$BIN/claudia-pet" >/dev/null 2>&1 < /dev/null &
   echo "claudia-pet 已经打开。"

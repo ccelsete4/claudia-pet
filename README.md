@@ -180,7 +180,7 @@ Claude Code 插件只往本机的 `%USERPROFILE%\.claudia\state` 写几个小文
 
 ## 已知限制
 
-- 只认 Claude 桌面端。Linux 版另见 [linux/README.md](linux/README.md)，还不能待在 Claude 窗口里。
+- 只认 Claude 桌面端。Linux 版可通过 GNOME Shell 扩展待在 Claude 窗口里，见 [Linux 安装说明](linux/README.md#跟着-claude-窗口)。
 - 目前只在 Windows 11、单显示器、100% 缩放下完整用过；多显示器（包括桌面模式下把她拖到另一块屏幕）、其他缩放比例和 Windows 10 还没有完整验证。
 - 真实 Code 会话里的 Windows 通知还没有完整验收。
 
