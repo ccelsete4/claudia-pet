@@ -17,7 +17,7 @@ namespace Claudia
             {
                 ["version"] = Store.Version + " Windows", ["platform"] = "windows", ["appVersion"] = Store.Version,
                 ["size"] = Scale, ["textSize"] = TextScale, ["textLinked"] = TextLinked, ["showName"] = ShowName,
-                ["aura"] = AuraMode, ["powerSave"] = PowerSave, ["quotaStyle"] = QuotaStyle,
+                ["aura"] = AuraMode, ["quotaStyle"] = QuotaStyle,
                 ["clickBounce"] = SettingOn("clickBounce"), ["tumbleActions"] = SettingOn("tumbleActions"), ["idleEnabled"] = SettingOn("idleEnabled"), ["idleFrequency"] = IdleFrequency,
                 ["notifyResults"] = SettingOn("notifyResults"), ["notifyWaiting"] = SettingOn("notifyWaiting"), ["notifyBackgroundOnly"] = SettingOn("notifyBackgroundOnly"),
                 ["physicsEnabled"] = PhysicsEnabled, ["ceilingBounce"] = CeilingBounce,
@@ -78,7 +78,6 @@ namespace Claudia
                         case "runMode":   // 所有几只共用（Store.SetStandalone），别的那几只一秒内跟上
                             if (value is string rm && (rm == "claude" || rm == "standalone")) { Store.SetStandalone(rm == "standalone"); CheckRunMode(); }
                             break;
-                        case "powerSave": Store.Settings["powerSave"] = on; Store.SaveSettings(); Js($"setPowerSave({(on ? "true" : "false")})"); break;
                         case "aura":
                             if (value is string m && (m == "auto" || m == "on" || m == "off")) { Store.Settings["auraMode"] = m; Store.SaveSettings(); Js($"setAuraMode({Q(m)})"); }
                             break;

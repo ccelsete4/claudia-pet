@@ -11,7 +11,6 @@ namespace Claudia
 {
     sealed partial class Pet
     {
-        static bool PowerSave => Store.Flag("powerSave");
         static string QuotaStyle => Store.Settings.TryGetValue("quotaStyle", out var v) && v as string == "bars" ? "bars" : "text";
         static void After(int ms, Action a)
         {

@@ -1,4 +1,4 @@
-// 动画动作（claude-pet 动作包精灵图）：播放、对齐、睡觉来回播、再见的帧段、设置 / 省电 / 减少动画退回静态、读不到时退回静态。
+// 动画动作（claude-pet 动作包精灵图）：播放、对齐、睡觉来回播、再见的帧段；有动画的姿态没有静态图，省电 / 减少动画照样播，读不到改播待机动画。
 // Requires Playwright (NODE_PATH may point to the bundled runtime's node_modules).
 const { chromium } = require('playwright')
 const fs = require('fs')
@@ -31,13 +31,14 @@ function manifest() {
   // 配置里引用的精灵图都在 anim\ 里
   for (const [p, a] of Object.entries(m.characters.claude.animations))
     for (const n of a.sheets) assert.ok(m.characters.claude.sheets[n], `${p} 用的 ${n}.webp 不在 anim 里`)
-  // 替换掉的姿态都还留着静态立绘（关掉动画、读不到时用）；只有动画的是新加的小动作、余额钱袋和拖拽
+  // 被动画替换的姿态（2026-11-18 起连待机也算）一律不留静态立绘
   const replaced = ['idle', 'thinking', 'writing', 'running', 'compact', 'sleeping', 'happy', 'surprised', 'pat', 'bye', 'hum', 'stretch', 'yawn',
     'fest_spring', 'fest_lantern', 'fest_dragonboat', 'fest_midautumn', 'fest_halloween', 'fest_christmas']
   for (const p of replaced) assert.ok(m.characters.claude.animations[p], `${p} 要有动画`)
-  // 被替换的静态立绘已移出项目，只留待机图兜底（程序靠它识别角色）
-  assert.ok(m.characters.claude.poses.idle && m.characters.claude.blink, '待机图和眨眼帧要留着')
-  for (const p of replaced.filter(p => p !== 'idle')) assert.ok(!m.characters.claude.poses[p], `${p} 的旧静态立绘应已移出`)
+  // 2026-11-18 用户定：有动画的姿态，静态立绘全部移出项目（待机 idle.webp、眨眼帧也不留，程序看待机动画识别角色）
+  assert.ok(!m.characters.claude.blink, '眨眼帧 idle-blink 应已移出')
+  for (const p of Object.keys(m.characters.claude.animations)) assert.ok(!m.characters.claude.poses[p], `${p} 已经有动画，旧静态立绘应已移出`)
+  for (const f of ['avatar.webp', 'portrait.webp', 'portrait-card.webp']) assert.ok(!fs.existsSync(path.join(dir, f)), `${f} 没用到，应已移出`)
   // 帧数不满 120 的两张，配置里要把结束帧写对
   assert.equal(m.characters.claude.animations.qingtuan.to, 93); assert.equal(m.characters.claude.animations.fest_newyear.to, 118)   // 元旦里有吃糖葫芦（2026-11-10 起）
 
@@ -204,17 +205,13 @@ function manifest() {
     await page.evaluate(() => setBehavior({ idleEnabled: false })); await waitSheet()
     assert.equal((await state()).url, '工作状态-思考冒泡.webp')
 
-    // 省电：待机 / 睡觉用静态，干活的样子照常动
-    await page.evaluate(() => { setPowerSave(true); pose = null; setPose('idle', true) }); await page.waitForTimeout(300)
-    assert.equal((await state()).on, false)
     await page.evaluate(() => setPose('writing', true)); await waitSheet()
     assert.equal((await state()).url, '写代码.webp')   // 2026-11-10 写东西只用写代码，轻快记录给了听你说
-    await page.evaluate(() => setPowerSave(false))
 
-    // 系统要求减少动画：全部静态
+    // 系统要求减少动画：有动画的姿态照样播动画（2026-11-18 起）
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.evaluate(() => { pose = null; setPose('idle', true) }); await page.waitForTimeout(300)
-    assert.equal((await state()).on, false)
+    await page.evaluate(() => { pose = null; setPose('thinking', true) }); await waitSheet()
+    assert.equal((await state()).url, '工作状态-思考冒泡.webp')
     await page.emulateMedia({ reducedMotion: 'no-preference' })
 
     // 拖着她：盖一层「被拎起来」，松手后回到原来的常态动画；被甩出火气后不盖
@@ -278,6 +275,7 @@ function manifest() {
     assert.ok(!(await pool(['play'])).some(p => groupOf('craft').includes(p)))
     // 拆礼物没有专门的触发时机，放在玩耍组里随机
     assert.ok((await pool(['play'])).includes('update'))
+    assert.ok((await pool(['play'])).includes('detective'))   // 2026-11-18 自制「小侦探」，不限时段
     await page.evaluate(() => { setBehavior({ idleEnabled: true }); idleSettings.actions = ['hum'] })
     await page.evaluate(() => { setPose('idle', true); lastActive = Date.now(); idleTick() })
     assert.equal((await state()).pose, 'hum')
@@ -371,12 +369,12 @@ function manifest() {
     assert.ok(await page.evaluate(() => messages.some(m => 'walk' in m && m.walk === null)))
     await page.evaluate(() => { setMotionActive(false); clearTimeout(revertTimer); setPose('idle', true) })
 
-    // 精灵图读不到：退回静态立绘，并报给外壳
+    // 精灵图读不到：报给外壳，改播待机动画，不露静态立绘
     await page.evaluate(() => { char().sheets['被吓一跳'] = char().sheets['被吓一跳'] + '.missing'; pose = null; setPose('surprised', true) })
-    await page.waitForFunction(() => !sheet && messages.some(x => x.imageError?.includes('.missing')))
-    s = await state(); assert.equal(s.on, false); assert.equal(s.bodyClass, 'm-jolt')
+    await page.waitForFunction(() => messages.some(x => x.imageError?.includes('.missing')) && sheet?.img && sheet.fallback)
+    assert.equal((await state()).url, '待机呼吸休闲.webp')
 
     assert.deepEqual(errors, [])
-    console.log('PASS: sheet playback, alignment, random click reactions, sleep hold, farewell range, drag overlay, snack caught, quota tiers, idle groups, seasonal/lunar filters, group-balanced picks, walking, still-sprite fallbacks (setting, power save, reduced motion, missing file)')
+    console.log('PASS: sheet playback, alignment, random click reactions, sleep hold, farewell range, drag overlay, snack caught, quota tiers, idle groups, seasonal/lunar filters, group-balanced picks, walking, no still fallback (reduced motion keeps animating; missing sheet plays idle)')
   } finally { await browser.close() }
 })().catch(e => { console.error(e); process.exit(1) })

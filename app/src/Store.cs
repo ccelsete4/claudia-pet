@@ -269,6 +269,12 @@ namespace Claudia
             return sheets;
         }
 
+        /// <summary>character.json 的 animations.idle 用到的精灵图里，至少有一张真的在 anim\ 里</summary>
+        static bool HasIdleSheet(Dictionary<string, object> info, Dictionary<string, object> sheets) =>
+            info.TryGetValue("animations", out var a) && a is Dictionary<string, object> anims &&
+            anims.TryGetValue("idle", out var i) && i is Dictionary<string, object> idle &&
+            idle.TryGetValue("sheets", out var n) && n is object[] names && names.OfType<string>().Any(sheets.ContainsKey);
+
         public static Dictionary<string, object> Manifest()
         {
             var chars = new Dictionary<string, object>();
@@ -279,10 +285,12 @@ namespace Claudia
                 if (info == null) continue;
                 var id = Path.GetFileName(dir);
                 var (poses, blink, blinkBase) = Sprites(dir);
-                if (!(poses.ContainsKey("idle") || poses.ContainsKey("default"))) continue;
+                var sheets = Sheets(dir);
+                // 有待机立绘，或者有待机动画（2026-11-18 起 Claude 角色不再带静态的 idle.webp），才算一个角色
+                if (!(poses.ContainsKey("idle") || poses.ContainsKey("default") || HasIdleSheet(info, sheets))) continue;
                 if (Names.TryGetValue(id, out var custom) && custom is string s && s.Trim() != "") info["name"] = s.Trim();
                 info["poses"] = poses; info["blink"] = blink; info["blinkBase"] = blinkBase;
-                info["sheets"] = Sheets(dir);
+                info["sheets"] = sheets;
                 chars[id] = info;
             }
             return new Dictionary<string, object> { ["characters"] = chars };

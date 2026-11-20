@@ -69,6 +69,7 @@ const root = path.resolve(__dirname, '..');
       setQuotaStyle('bars');
     }, info);
     await page.waitForTimeout(650);
+    await page.waitForFunction(() => sheet?.img && document.documentElement.classList.contains('sheet-on'));   // 待机没有静态图了：等待机动画画出来再量
     await page.waitForFunction(() => messages.some(m => m.hitRects));
     await page.evaluate(() => { messages.length = 0; say('测试点击区域'); });
     await page.waitForFunction(() => messages.at(-1)?.hitRects?.length === 4);

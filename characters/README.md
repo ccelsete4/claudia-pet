@@ -8,8 +8,8 @@
 
 碰边动作立绘（`bonk`、`bonk-2`、`bonk-3`、`stagger`、`stagger-2`、`stagger-3`、`faceplant`、`faceplant-2`、`fallen-1`、`fallen`、`fallen-2`，按 `character.json` 的 `frames` 顺序翻页播放）不是 CrossPet 原有的：它们以 CrossPet 的设计参考图、claude-pet 动作包的待机帧（比例）和旧碰边立绘或本套上一帧（姿势）为参考，在 OpenAI Codex 中生成，再用 `scripts/prepare-sprites.py` 统一大小、对齐。同样沿用 CC BY-NC-SA 4.0，提示词见 [docs/prompts/碰边补帧/](../docs/prompts/碰边补帧/)。`character.json` 里这几个动作的台词（`bonk`、`stagger`、`fallen`、`faceplant`、倒地后站回去时说的 `getup`、带 `Angry` 后缀的生气版和 `tumbleAsk`），以及点击反应「傲娇」的 `pout`（2026-11-06 Claude 起草，用户未审），也是本项目新写的，其余台词与 CrossPet 原版一致。
 
-听你说、看书、忙碌左右、查资料、哎呀、累了、鼓脸、赌气、晕乎乎、被哄、原谅你、六个时段问候、元旦这 19 张也不是 CrossPet 原图：2026-11-05 按动画的身体比例重画（裙摆下露一小截白袜和小皮鞋），姿势和道具照原图，提示词见 [docs/prompts/立绘重画-统一比例/](../docs/prompts/立绘重画-统一比例/)，同样沿用 CC BY-NC-SA 4.0。
+看书、忙碌左右、查资料、累了、鼓脸、赌气、晕乎乎、被哄、原谅你、六个时段问候、元旦这些也不是 CrossPet 原图（其中听你说、哎呀、问候、元旦后来又被动画替换、移出了项目）：2026-11-05 按动画的身体比例重画（裙摆下露一小截白袜和小皮鞋），姿势和道具照原图，提示词见 [docs/prompts/立绘重画-统一比例/](../docs/prompts/立绘重画-统一比例/)，同样沿用 CC BY-NC-SA 4.0。
 
-`claude/anim/` 里是动画动作的精灵图，来自 hunmer 的 claude-pet 动作包（[hunmer/aboutme-pets](https://github.com/hunmer/aboutme-pets) 的 `pets/claude`），作者书面授权按 CC BY-NC-SA 4.0 使用，原样复制没有改动；每张用在哪个姿态见 [claude/anim/SOURCE.md](claude/anim/SOURCE.md)，播放配置在 `character.json` 的 `animations`。被动画替换的姿态（思考、写东西、摸头、节日等）原来的静态立绘已经从项目里移除，只留待机图 `idle.webp` 和眨眼帧：程序靠待机图识别角色，系统要求减少动画、动画读不到时也用它兜底；还有静态立绘的姿态（累了、碰边动作等）照常用静态图。自己加的角色不写 `animations` 就只用静态立绘。
+`claude/anim/` 里是动画动作的精灵图，来自 hunmer 的 claude-pet 动作包（[hunmer/aboutme-pets](https://github.com/hunmer/aboutme-pets) 的 `pets/claude`），作者书面授权按 CC BY-NC-SA 4.0 使用，原样复制没有改动；每张用在哪个姿态见 [claude/anim/SOURCE.md](claude/anim/SOURCE.md)，播放配置在 `character.json` 的 `animations`。被动画替换的姿态（待机、听你说、思考、写东西、摸头、哎呀、拆礼物、节日等）的静态立绘已经全部移出项目（2026-11-18，连待机图 `idle.webp` 和眨眼帧也不留）：有动画的姿态一律播动画，省电模式、系统要求减少动画时也一样，精灵图读不出来就改播待机动画；程序看到 `animations.idle` 有精灵图就认作一个角色。移出来的旧图备份在 [../archive/旧立绘-已被动画替换-不再使用/](../archive/旧立绘-已被动画替换-不再使用/)，**是旧的、不要再用**。还没有动画的姿态（累了、碰边动作等）照常用静态图。自己加的角色不写 `animations` 就只用静态立绘，这时要有 `idle` 立绘。
 
-`avatar.webp`、`portrait.webp`、`portrait-card.webp` 是展示素材，不作为普通动作播放。`clawd.webp` 是抱 Clawd 的现有立绘，也作为 [软件图标](../icon/README.md) 的制作参考。
+原来的 `avatar.webp`、`portrait.webp`、`portrait-card.webp`（头像、展示图，程序没用到）也一起移进了上面的备份目录。`clawd.webp` 是抱 Clawd 的现有立绘，也作为 [软件图标](../icon/README.md) 的制作参考。

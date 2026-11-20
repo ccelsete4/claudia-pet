@@ -149,7 +149,7 @@ namespace Claudia
                     ready = false;
                     if (!a.IsSuccess) { Store.Log("桌宠页面加载失败: " + a.WebErrorStatus); return; }
                     LoadCharacters();
-                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setPowerSave({(PowerSave ? "true" : "false")}); setQuotaStyle({Q(QuotaStyle)}); setBehavior({Store.Json.Serialize(BehaviorState())})");
+                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setQuotaStyle({Q(QuotaStyle)}); setBehavior({Store.Json.Serialize(BehaviorState())})");
                     // 刚更新完（上次打开的是别的版本）：让她说一声
                     var last = Store.Settings.TryGetValue("lastVersion", out var lv) ? lv as string : null;
                     // 「新功能」页看到哪一版了（设置里的小红点用）：没记过时，老用户按上次的版本算（有没看过的就亮），新安装按当前版本（不亮）。要在下面改掉 lastVersion 之前记

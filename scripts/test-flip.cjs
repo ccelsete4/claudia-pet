@@ -97,11 +97,11 @@ console.log('PASS: frames config (files, grouping, timings vs tumble steps)');
         await page.evaluate(() => setPose('idle'));
         assert.equal(await page.evaluate(() => document.documentElement.classList.contains('flipping')), false);
 
-        // 循环翻页（工作状态）：看书 读 2.4 秒 → 翻页 0.9 秒 → 读……一直转（2026-11-07 起两张同一批画的，人不再一大一小）
+        // 循环翻页（工作状态）：查资料 看 1.55 秒 → 过渡帧 0.15 秒 → 另一张……一直转（看书 2026-11-18 起换成动画，不再翻页）
         await clear();
-        await page.evaluate(() => setPose('reading'));
+        await page.evaluate(() => setPose('searching'));
         await page.waitForTimeout(3700);
-        assert.deepEqual((await shown()).slice(0, 3), ['reading', 'reading-2', 'reading'], 'reading loops back');
+        assert.deepEqual((await shown()).slice(0, 4), ['searching', 'searching-m1', 'searching-2', 'searching-m1'], 'searching loops');
         await page.evaluate(() => setPose('idle')); await page.waitForTimeout(300);
         // 碰边整套：碰底边、抽中摇晃 → 站不稳三张 → 趴地两张 → 直接站回待机（不演爬起）
         await clear();

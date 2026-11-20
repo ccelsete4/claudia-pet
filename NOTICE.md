@@ -33,6 +33,8 @@ claudia-pet 作为独立项目维护，基于 [CrossPet](https://github.com/loki
 
 本项目原样使用这些精灵图文件（没有重新编码），只在播放时缩放、对齐，按每个姿态选取播放的帧段。文件清单和用途见 [characters/claude/anim/SOURCE.md](characters/claude/anim/SOURCE.md)。
 
+作者不再出新动作后，本项目自己生成的动画（2026-11-18 起，目前有「看书-翻页」「得意-叉腰」「小侦探-放大镜」）也放在 `characters/claude/anim/`：以动作包里待机动画的第 1 帧为首帧、尾帧，用 ByteDance Seedance 2.0 生成绿幕视频后抠像、按同一规格转成精灵图。它们基于作者的帧，同样按 CC BY-NC-SA 4.0 发布，署名 hunmer 和 claudia-pet；做法和清单见 SOURCE.md 末尾。
+
 | 内容 | 来源 | 授权 |
 |---|---|---|
 | 源代码 | claudia-pet，基于 CrossPet；`web/dsh-physics.js` 摘录自 dsh-pet | MIT；保留 claudia-pet、CrossPet 及 dsh-pet 的版权与许可声明 |

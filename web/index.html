@@ -53,7 +53,7 @@ html.flipping #body img, html.flipping #body canvas.sheet { transition: none; } 
 html.sheet-on #body img { opacity: 0 !important; }
 html.moving #body canvas.sheet { transition: none !important; }
 #fx { position: absolute; inset: 0; transition: opacity .3s; pointer-events: none; }
-/* 闲着久了：身边的特效淡出（见「特效省电」） */
+/* 闲着久了：身边的特效淡出（见「特效降帧」） */
 #fx.rest { opacity: 0; transition: opacity 1.2s; }
 /* 看不见（被挡住、锁屏）：所有动画暂停 */
 html.frozen *, html.frozen *::before, html.frozen *::after { animation-play-state: paused !important; }
@@ -324,6 +324,13 @@ setInterval(() => {
     if (!active.getAttribute('src') && currentUrl) active.src = currentUrl
     active.classList.add('on')
   }
+  // 「正在播动画」的标记还挂着、却没有动画在播：静态图全被它压成透明，人就不见了（2026-11-18 装上去后碰到过一次，没复现出来源）。
+  // 去掉标记让静态图露出来，并记进日志，下次能查是从哪个姿态来的
+  const root = document.documentElement
+  if (root.classList.contains('sheet-on') && !sheet && !sheetFront) {
+    root.classList.remove('sheet-on')
+    window.chrome?.webview?.postMessage({ jsError: `sheet-on 残留已清除（姿态 ${pose}，在播翻页 ${!!flip}）` })
+  }
 }, 2000)
 
 // instant：同一个姿态里只是数字变了（比如更新进度），直接换掉，不淡出淡入
@@ -412,8 +419,9 @@ function flipNext() {
 //   sheets 随机选一张；from / to 播放范围；loop 播完从头再来；hold [a, b] 播到 to 后在 a～b 之间来回（睡着时一直睡）；
 //   full 让临时状态停满整段（不然按 TRANSIENT 的时长换回去，靠交叉淡入盖住）。
 // 每张 8 列、每帧 640×360、12 fps；作者每个动作第 1 帧里人物在 x 206–444、y 40–321，按人物高、脚底、中线和静态立绘对齐。
-// 被动画替换的静态立绘已经挪出项目（只留待机图 idle.webp 兜底）：系统要求减少动画时退回静态立绘（没有就是待机图）；
-// 省电模式下的待机 / 累了 / 睡觉，有静态图的才用静态图。animOn 只给测试和以后的开关用，外壳不再发 animatedSprites
+// 有动画的姿态一律播动画，不退回静态立绘（2026-11-18 用户定：被动画替换的静态图全部移出项目，连待机 idle.webp 也不留，
+// 系统要求减少动画时也照样播动画；精灵图读不出来就改播待机动画）。只有还没做动画的姿态用静态图。省电模式 2026-11-18 整个删掉，以后按程序实际情况另做
+// animOn 只给测试和以后的开关用，外壳不再发 animatedSprites
 const SHEET = { cols: 8, w: 640, h: 360, frames: 120, fps: 12, charH: 281, feetY: 321, centerX: 325 }
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)')
 const sheetCanvases = [$('sheetA'), $('sheetB')]
@@ -428,7 +436,7 @@ addEventListener('resize', () => {
 })
 function anim(p) {
   const c = char(), a = c?.animations?.[p]
-  if (!a || !animOn || REDUCED_MOTION.matches || (powerSave && RESTING.has(p) && c.poses?.[p])) return null
+  if (!a || !animOn) return null
   const urls = (a.sheets || []).map(n => c.sheets?.[n]).filter(Boolean)
   return urls.length ? { ...a, urls } : null
 }
@@ -526,8 +534,10 @@ function playSheet(a, still, key = null) {
   }, () => {
     if (sheet !== s) return
     window.chrome?.webview?.postMessage({ imageError: s.url })
+    // 读不到：不退回静态立绘，改播待机动画（只试一次，待机本身也读不到就停在原来的画面）
+    const idle = !s.fallback && anim('idle')
+    if (idle && idle.urls.some(u => u !== s.url)) { const k = { ...idle, urls: idle.urls.filter(u => u !== s.url) }; playSheet(k, null); sheet.fallback = true; return }
     stopSheet()
-    showImage(framesFor(pose)[0]); $('body').className = MOTION[pose] || 'm-bob'   // 读不到就用静态立绘
   })
 }
 // 读一张精灵图交给 done（ImageBitmap 或 <img>，都能 drawImage）；读不到调 fail。
@@ -614,7 +624,7 @@ function stopSheet() {
   clearTimeout(sheetReleaseTimer)
   sheetReleaseTimer = setTimeout(() => { if (!sheet) { endFade(); for (const c of sheetCanvases) { c.width = 1; c.height = 1 } } }, 450)
 }
-// 设置、省电、减少动画变了：当前姿态按新规则重画一次
+// 设置变了：当前姿态按新规则重画一次
 function refreshAnim() { const p = pose; if (!p || multi || farewellLine !== null) return; pose = null; setPose(p, true) }
 REDUCED_MOTION.addEventListener?.('change', refreshAnim)
 // 拖着她时播「被拎起来」（不换姿态，只盖一层动画）；被甩出火气、赌气、碰边、道别、多会话时照旧
@@ -1045,15 +1055,15 @@ function watchStuck() {
   }, STUCK_AFTER)
 }
 
-// ---- 特效省电 ----
+// ---- 特效降帧（闲着时自动停特效；不是设置里的开关）----
 // 实测（M 系列 Mac）：身边的 SVG 特效（星星、思考云、小卡片）是耗电大头，SVG 自己的时钟跑时整个桌宠占一个核的 16%～19%，
 // 停掉特效只剩 1.5%；人物浮动、光晕是 CSS 变换，几乎不花钱。所以只管特效：
-// - 暂停 SVG 自己的时钟，跟着屏幕刷新按帧推进（#fx、多会话卡片都算）：平时 60 帧（干活时约 11%），省电模式 30 帧（约 8%）。
-//   15 帧时画笔、终端里的字明显一顿一顿，用户反馈过，所以省电模式也不再往下压
-// - 闲着（待机 / 累 / 睡着）超过 30 秒（省电模式 10 秒）：特效淡出并停下；睡着的 zZz 保留，每秒 5 帧
+// - 暂停 SVG 自己的时钟，跟着屏幕刷新按帧推进（#fx、多会话卡片都算）：平时 60 帧（干活时约 11%）。
+//   15 帧时画笔、终端里的字明显一顿一顿，用户反馈过
+// - 闲着（待机 / 累 / 睡着）超过 30 秒：特效淡出并停下；睡着的 zZz 保留，每秒 5 帧
 // - 窗口看不见（被挡住、锁屏、屏幕休眠）：外壳调 setPageHidden(true)，全部暂停
 const RESTING = new Set(['idle', 'tired', 'sleeping'])
-let powerSave = false, fxResting = false, pageHidden = false, fxClock = null, fxFps = 0, restTimer = null
+let fxResting = false, pageHidden = false, fxClock = null, fxFps = 0, restTimer = null
 function fxTick() {
   const now = performance.now()
   for (const s of document.querySelectorAll('#fx svg, #cards svg')) {
@@ -1069,7 +1079,7 @@ function fxTick() {
   }
 }
 function applyFxRate() {
-  const fps = pageHidden ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : powerSave ? 30 : 60
+  const fps = pageHidden ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : 60
   $('fx').classList.toggle('rest', fxResting && pose !== 'sleeping' && !pageHidden)
   document.documentElement.classList.toggle('frozen', pageHidden)
   if (fps === fxFps && (fps === 0 || fxClock)) return
@@ -1099,7 +1109,7 @@ new MutationObserver(() => fxTick()).observe(document.getElementById('stage'), {
 function noteRest(p) {
   clearTimeout(restTimer)
   if (fxResting) { fxResting = false; applyFxRate() }
-  if (RESTING.has(p)) restTimer = setTimeout(() => { if (RESTING.has(pose)) { fxResting = true; applyFxRate() } }, powerSave ? 10000 : 30000)
+  if (RESTING.has(p)) restTimer = setTimeout(() => { if (RESTING.has(pose)) { fxResting = true; applyFxRate() } }, 30000)
 }
 // ---- 光晕呼吸：3 秒一次，放大到 1.04 再缩回（两段都是 ease-in-out，和原来的 CSS 动画一样）----
 // 原来用 CSS 动画一直在动，网页每秒出 60 帧，外壳要把每一帧拷进透明窗口（WebView2CompositionControl）：
@@ -1130,7 +1140,6 @@ function updateAnimationTimers() {
 }
 DARK.addEventListener('change', updateAnimationTimers)
 updateAnimationTimers()
-function setPowerSave(on) { const was = powerSave; powerSave = !!on; fxFps = -1; noteRest(pose); applyFxRate(); if (was !== powerSave && RESTING.has(pose)) refreshAnim() }
 function setPageHidden(h) {
   const wasHidden = pageHidden
   pageHidden = !!h

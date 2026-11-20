@@ -288,6 +288,7 @@
       "写完了！但我很生气！！"
     ],
     "look": ["嗯？谁在那边？", "……没人啊。"],
+    "detective": ["线索在哪儿呢……", "找到了！"],
     "tap": ["嗒、嗒、嗒……", "好闲哦～"],
     "cube": ["还差一面……", "这个魔方好难拧！"],
     "bubbles": ["呼——", "泡泡飞走啦～"],
@@ -326,18 +327,19 @@
     "faceplant": { "seq": ["faceplant", "faceplant-m1", "faceplant-2"], "ms": [600, 200] },
     "fallen": { "seq": ["fallen-1", "fallen", "fallen-m1", "fallen-2"], "ms": [300, 700, 200] },
     "delegating": { "seq": ["delegating", "delegating-m1", "delegating-2", "delegating-m2", "delegating-m2b", "delegating-3", "delegating-m3", "delegating-m3b"], "ms": [1600, 150, 1400, 120, 120, 1100, 120, 120], "loop": true },
-    "searching": { "seq": ["searching", "searching-m1", "searching-2", "searching-m1"], "ms": [1550, 150, 1550, 150], "loop": true },
-    "reading": { "seq": ["reading", "reading-2"], "ms": [2400, 900], "loop": true }
+    "searching": { "seq": ["searching", "searching-m1", "searching-2", "searching-m1"], "ms": [1550, 150, 1550, 150], "loop": true }
   },
   "animations": {
     "idle": { "sheets": ["待机呼吸休闲"], "loop": true },
     "thinking": { "sheets": ["工作状态-思考冒泡"], "loop": true },
     "listening": { "sheets": ["轻快记录"], "from": 10, "loop": true },
     "writing": { "sheets": ["写代码"], "loop": true },
+    "reading": { "sheets": ["看书-翻页"], "loop": true },
     "running": { "sheets": ["工作状态-忙碌点按"], "loop": true },
     "compact": { "sheets": ["工作状态-清点归档"], "loop": true },
     "sleeping": { "sheets": ["原地小憩沉眠"], "to": 76, "hold": [28, 76], "exit": { "from": 77 } },
     "happy": { "sheets": ["工作状态-雀跃庆祝"], "full": true },
+    "proud": { "sheets": ["得意-叉腰"], "to": 71, "full": true },
     "surprised": { "sheets": ["被吓一跳"], "full": true },
     "pat": { "sheets": ["点击回应-元气挥手", "点击回应-害羞惊讶", "点击回应-开心跃动", "点击回应-挠痒咯咯笑"], "full": true },
     "pout": { "sheets": ["点击回应-傲娇生气"], "full": true },
@@ -391,6 +393,7 @@
     "shuttlecock": { "sheets": ["踢毽子"], "full": true, "idle": "play" },
     "rockinghorse": { "sheets": ["骑木马"], "full": true, "idle": "play" },
     "pagebeat": { "sheets": ["书页拍打节奏"], "full": true, "idle": "play" },
+    "detective": { "sheets": ["小侦探-放大镜"], "to": 95, "full": true, "idle": "play" },
     "animals": { "sheets": ["动物环绕"], "full": true, "idle": "magic" },
     "butterflies": { "sheets": ["蝴蝶蜜蜂环绕头顶开花"], "full": true, "idle": "magic" },
     "rice": { "sheets": ["吃白饭"], "full": true, "idle": "food", "when": { "hours": [[11, 14], [17, 20]] } },
