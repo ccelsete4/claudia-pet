@@ -649,7 +649,7 @@ function scheduleHitRects() {
       window.chrome.webview.postMessage({ hitRects: rects })
     }
     // CSS 变形和 Q 弹不改变布局尺寸，沿用原来的采样间隔，但只在动画期间由网页自己量。
-    if (hitTransformElements.some(el => el.getAnimations().some(a => a.pending || a.playState === 'running')))
+    if (hitTransformElements.some(el => el.getAnimations().some(a => a.pending || a.playState === 'running' || bodyAnimations.has(a))))
       hitAnimationTimer = setTimeout(scheduleHitRects, 250)
   })
 }
@@ -973,6 +973,7 @@ function applyFxRate() {
   // 停过表（藏起来、闲着歇了）再开：从停下时的那一帧接着走，不一下子跳过停着的那段
   if (fxFps <= 0 && fps > 0) { const now = performance.now(); for (const s of fxNodes) if (s._fxLast !== undefined) { s._fxT = s._fxLast; s._fxS = now } }
   fxFps = fps
+  updateBodyClock()
   clearInterval(fxClock); fxClock = null
   if (fxRaf) { cancelAnimationFrame(fxRaf); fxRaf = 0 }
   if (fps > 0) {
@@ -989,7 +990,9 @@ let fxRaf = 0, fxLast = 0
 function fxLoop(t) {
   fxRaf = 0
   if (fxFps <= 0) return
-  if (t - fxLast >= 1000 / fxFps - 4) { fxLast = t; fxTick() }
+  if (bodyAnimations.size && fxFps === BODY_FPS) {
+    if (bodyTick(t)) { fxLast = t; fxTick() }
+  } else if (t - fxLast >= 1000 / fxFps - 4) { fxLast = t; fxTick() }
   fxRaf = requestAnimationFrame(fxLoop)
 }
 const fxObserver = new MutationObserver(() => {
@@ -1003,6 +1006,56 @@ function noteRest(p) {
   if (fxResting) { fxResting = false; applyFxRate() }
   if (RESTING.has(p)) restTimer = setTimeout(() => { if (RESTING.has(pose)) { fxResting = true; applyFxRate() } }, 30000)
 }
+// 无限循环的身体动画和会话卡片共用 60 FPS 的时间表；一次性动画仍走 CSS 时间轴。
+const BODY_FPS = 60
+const BODY_FRAME = 1000 / BODY_FPS
+const bodyAnimations = new Map()
+let bodyNext = null, bodyRaf = 0
+function bodyTick(now) {
+  const deadline = bodyNext ?? now
+  if (now + .1 < deadline) return false  // 容许刷新时间戳的取整误差
+  bodyNext = deadline + (Math.floor((now + .1 - deadline) / BODY_FRAME) + 1) * BODY_FRAME
+  for (const [animation, clock] of bodyAnimations) {
+    if (animation.pending) continue
+    clock.start ??= now
+    animation.currentTime = clock.time + now - clock.start
+  }
+  return true
+}
+function bodyLoop(now) {
+  bodyRaf = 0
+  bodyTick(now)
+  updateBodyClock()
+}
+function updateBodyClock() {
+  if (!bodyAnimations.size) bodyNext = null
+  const needsFrame = bodyAnimations.size && fxFps !== BODY_FPS
+  if (needsFrame && !bodyRaf) bodyRaf = requestAnimationFrame(bodyLoop)
+  if (!needsFrame && bodyRaf) { cancelAnimationFrame(bodyRaf); bodyRaf = 0 }
+}
+function refreshBodyAnimations() {
+  const active = new Set()
+  if (!pageHidden) {
+    const body = $('body'), cards = $('cards')
+    const animations = cards.getAnimations({ subtree: true })
+    if (!document.documentElement.classList.contains('clicking')) animations.push(...body.getAnimations())
+    for (const animation of animations) {
+      if (!(animation instanceof CSSAnimation) || animation.effect.getComputedTiming().iterations !== Infinity) continue
+      active.add(animation)
+      if (bodyAnimations.has(animation)) continue
+      const time = Number(animation.currentTime) || 0
+      animation.pause()
+      bodyAnimations.set(animation, { time, start: null })
+    }
+  }
+  for (const animation of bodyAnimations.keys())
+    if (!active.has(animation)) bodyAnimations.delete(animation)
+  updateBodyClock()
+}
+const bodyObserver = new MutationObserver(refreshBodyAnimations)
+for (const el of [document.documentElement, $('body')])
+  bodyObserver.observe(el, { attributes: true, attributeFilter: ['class'] })
+bodyObserver.observe($('cards'), { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
 // ---- 光晕呼吸：3 秒一次，放大到 1.04 再缩回（两段都是 ease-in-out，和原来的 CSS 动画一样）----
 // 原来用 CSS 动画一直在动，网页每秒出 60 帧，外壳要把每一帧拷进透明窗口（WebView2CompositionControl）：
 // 实测待机时外壳约 15%、显卡进程 13–24% 单核几乎全花在这（2026-11-06）。改成脚本每秒设 12 次：
@@ -1040,6 +1093,7 @@ function setPageHidden(h) {
   applyFxRate()
   if (wasHidden && !pageHidden) { upgradeScaledSheet(); sheetDraw() }
   updateAnimationTimers()
+  refreshBodyAnimations()
   scheduleHitRects()
 }
 applyFxRate()

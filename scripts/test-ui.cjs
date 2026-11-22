@@ -52,6 +52,15 @@ const root = path.resolve(__dirname, '..');
     assert.ok(await page.evaluate(() => messages.some(m => m.key === 'idleFrequency' && m.value === 'lively')));
     assert.equal(await page.locator('[data-idle-action]').count(), 0);
     await page.goto(pathToFileURL(path.join(root, 'web/index.html')).href);
+    const stepCounts = await page.evaluate(() => [60, 144, 240, 319].map(hz => {
+      bodyNext = null;
+      let count = 0;
+      for (let frame = 0; frame < hz * 10; frame++)
+        if (bodyTick(frame * 1000 / hz)) count++;
+      bodyNext = null;
+      return count;
+    }));
+    assert.deepEqual(stepCounts, [600, 600, 600, 600], 'body clock must average 60 steps per second across refresh rates');
     const info = JSON.parse(fs.readFileSync(path.join(root, 'characters/claude/character.json'), 'utf8'));
     info.poses = {};
     for (const file of fs.readdirSync(path.join(root, 'characters/claude')).filter(f => f.endsWith('.webp'))) {
@@ -93,6 +102,17 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('#body img.on').count(), 1, 'moving must show just one silhouette');
     await page.evaluate(() => setMotionActive(false));
     assert.equal(await page.locator('#body').evaluate(el => getComputedStyle(el).animationName), 'dizzy');
+    await page.waitForFunction(() => bodyAnimations.size > 0);
+    const frozen = await page.evaluate(() => {
+      const [animation] = bodyAnimations.keys();
+      setPageHidden(true);
+      return animation.currentTime;
+    });
+    await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => bodyAnimations.size), 0, 'hidden page retained a body animation clock');
+    assert.equal(await page.locator('#body').evaluate(el => el.getAnimations()[0].currentTime), frozen);
+    await page.evaluate(() => setPageHidden(false));
+    await page.waitForFunction(last => $('body').getAnimations()[0]?.currentTime > last, frozen);
     // Edge-hit poses: an opening move, then a loop that keeps going (they must never freeze).
     for (const [p, intro, loop] of [['bonk','bonk','wince'], ['stagger','stagger','wobble'], ['fallen','plop','breathe'], ['faceplant','flop','breathe']]) {
       await page.evaluate(p => setPose(p, true), p);

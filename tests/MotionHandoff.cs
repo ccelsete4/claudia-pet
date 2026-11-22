@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 
 namespace Claudia
 {
@@ -73,11 +74,52 @@ namespace Claudia
     }
     static class MotionHandoffRunner
     {
+        static void TestCharacterMigration(string id)
+        {
+            Store.LoadSettings();
+            var source = Path.Combine(Store.BuiltinCharacters, id);
+            var data = Path.Combine(Store.Characters, id);
+            try
+            {
+                Directory.CreateDirectory(source);
+                Directory.CreateDirectory(data);
+                File.WriteAllText(Path.Combine(source, "character.json"), "{}");
+                File.Copy(Path.Combine(source, "character.json"), Path.Combine(data, "character.json"));
+                File.WriteAllText(Path.Combine(source, "idle.png"), "original");
+                File.Copy(Path.Combine(source, "idle.png"), Path.Combine(data, "idle.png"));
+                File.WriteAllText(Path.Combine(data, "idle.png"), "modified");
+                File.SetLastWriteTimeUtc(Path.Combine(data, "idle.png"), File.GetLastWriteTimeUtc(Path.Combine(source, "idle.png")));
+                Store.SyncResources();
+                Store.Manifest();
+                if (Store.CharacterDir(id) != data ||
+                    Store.CharactersRootFor("/characters/" + id + "/idle.png") != Store.Characters)
+                    throw new Exception("A same-size local edit was removed or hidden");
+
+                File.Delete(Path.Combine(data, "idle.png"));
+                Store.Manifest();
+                if (Store.CharacterDir(id) != source) throw new Exception("An incomplete local role hid the built-in");
+                File.Copy(Path.Combine(source, "idle.png"), Path.Combine(data, "idle.png"));
+                Store.SyncResources();
+                Store.SyncResources();
+                Store.Manifest();
+                if (Directory.Exists(data) || Store.CharacterDir(id) != source ||
+                    Store.CharactersRootFor("/characters/" + id + "/idle.png") != Store.BuiltinCharacters)
+                    throw new Exception("The verified mirror was not retired or the built-in route failed");
+                Console.WriteLine("PASS: built-in asset routing, exact mirror cleanup and preservation of local edits");
+            }
+            finally { if (Directory.Exists(source)) Directory.Delete(source, true); }
+        }
+
         [STAThread]
         static int Main()
         {
-            try { Pet.TestHandoff(); return 0; }
+            var id = "test-" + Guid.NewGuid().ToString("N");
+            var data = Path.Combine(Path.GetTempPath(), "claudia-" + id);
+            Environment.SetEnvironmentVariable("CLAUDIA_DATA_DIR", data);
+            Environment.SetEnvironmentVariable("CLAUDIA_STATE_DIR", Path.Combine(data, "state"));
+            try { Pet.TestHandoff(); TestCharacterMigration(id); return 0; }
             catch (Exception e) { Console.Error.WriteLine(e); return 1; }
+            finally { if (Directory.Exists(data)) Directory.Delete(data, true); }
         }
     }
 }

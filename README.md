@@ -142,6 +142,8 @@ claudia-pet 是一个 Windows 上的 Claude 桌宠（也有 Linux 版，见 [lin
 
 Windows 的勿扰模式和通知设置会影响任务通知能不能弹出来。
 
+Windows 和 Linux 都从安装目录读取内置角色。旧数据目录里与当前内置角色逐文件一致的镜像会自动清理。有差异的同名角色会被保留，有有效待机素材时优先使用。要切回内置角色，可以通过「通用 → 角色」打开数据目录，把同名角色文件夹移到别处，再重启桌宠。
+
 ## 安装
 
 目标平台为 Windows 10/11，目前只在 Windows 11 上实际验证过。运行需要 .NET Framework 4.8（Windows 自带）和 Microsoft Edge WebView2 运行时（Windows 11 自带）。
