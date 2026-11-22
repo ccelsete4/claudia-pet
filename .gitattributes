@@ -1,0 +1,10 @@
+# 工作区一律用 LF：这个仓库放在 Windows 和 Linux 共用的目录里，两边都在这里改、都从这里构建和安装。
+# Windows 那边 git 全局开着 core.autocrlf 时，没有这一行就会签出成 CRLF：Linux 的 git 看到满屏「已修改」，
+# linux/claudia-pet 的第一行变成 "#!/bin/sh\r"，装出来跑不起来（2026-11-22）。
+# Windows 上的 C# 编译器、PowerShell 7、Node 都认 LF。
+* text=auto eol=lf
+
+*.webp binary
+*.png binary
+*.ico binary
+*.7z binary
