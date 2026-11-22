@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Web.Script.Serialization;
 
 namespace Claudia
@@ -35,7 +36,7 @@ namespace Claudia
         public static string Version => ReadText(Path.Combine(Install, "VERSION"))?.Trim() ?? "0";
 
         // 网页从两个虚拟域名读文件：程序自带的网页 https://claudia.app/（安装目录\web，文件夹映射）
-        // 和角色立绘 https://claudia.data/characters/…（数据目录，用户可以改；程序自己读文件交出去，见 SpriteResources）
+        // 和角色立绘 https://claudia.data/characters/…（安装目录或数据目录，见 SpriteResources）
         public const string AppHost = "claudia.app", DataHost = "claudia.data";
 
         /// <summary>软件名（程序、安装目录、插件、MCP 配置项、窗口标题）。桌宠角色本身叫 claudia，见 characters\claude\character.json</summary>
@@ -151,39 +152,46 @@ namespace Claudia
             standalone = on; runCheckedAt = DateTime.MinValue;
         }
 
-        /// <summary>程序自带的角色（安装目录\characters）。直接从这里读，不再往数据目录拷一份：
-        /// 原来每次启动把它镜像到数据目录，立绘（约 283 MB）在磁盘上存两份（2026-11-20）。
-        /// 数据目录\characters 现在只放用户另外添加的角色；和自带角色重名的以自带的为准。</summary>
+        /// <summary>内置角色直接从安装目录读取；数据目录里有效的同名角色仍可覆盖。</summary>
         public static string BuiltinCharacters => Path.Combine(Install, "characters");
-        static bool IsBuiltin(string id) => !string.IsNullOrEmpty(id) && id.IndexOfAny(new[] { '/', '\\', ':' }) < 0 && id != "." && id != ".."
-            && Directory.Exists(Path.Combine(BuiltinCharacters, id));
-        /// <summary>这个角色的文件夹：自带的在安装目录，另外添加的在数据目录</summary>
-        public static string CharacterDir(string id) => Path.Combine(IsBuiltin(id) ? BuiltinCharacters : Characters, id ?? "");
+        static Dictionary<string, string> characterDirs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public static string CharacterDir(string id) =>
+            characterDirs.TryGetValue(id, out var dir) ? dir : Path.Combine(Characters, id);
         /// <summary>立绘地址 /characters/&lt;角色&gt;/… 该到哪个 characters 目录下找（路径本身的校验在 SpritePath.TryResolve）</summary>
         public static string CharactersRootFor(string absolutePath)
         {
             var parts = (absolutePath ?? "").Split('/');
             string id = null;
             try { if (parts.Length > 2) id = Uri.UnescapeDataString(parts[2]); } catch { }
-            return IsBuiltin(id) ? BuiltinCharacters : Characters;
+            return id != null && characterDirs.TryGetValue(id, out var dir) ? Path.GetDirectoryName(dir) : Characters;
         }
 
-        /// <summary>自带角色不再拷进数据目录；以前版本留在那里的镜像，和自带的一模一样就删掉，不一样（被改过）的留着不动。
-        /// 用户另外添加的角色目录不碰。</summary>
+        /// <summary>恢复旧同步遗留的备份。仅退役已逐文件验证的重复镜像。</summary>
         public static void SyncResources()
         {
             Directory.CreateDirectory(Characters);
             Directory.CreateDirectory(State);
             var src = BuiltinCharacters;
-            if (string.Equals(Path.GetFullPath(src), Path.GetFullPath(Characters), StringComparison.OrdinalIgnoreCase)) return;
+            if (!Directory.Exists(src) ||
+                string.Equals(Path.GetFullPath(src), Path.GetFullPath(Characters), StringComparison.OrdinalIgnoreCase)) return;
+            // 数据目录可能经由联接指向安装目录。此时只加载素材，不迁移。
+            for (var dir = new DirectoryInfo(Characters); dir != null; dir = dir.Parent)
+                if ((dir.Attributes & FileAttributes.ReparsePoint) != 0) return;
             foreach (var dir in Directory.GetDirectories(src))
             {
                 var old = Path.Combine(Characters, Path.GetFileName(dir));
                 try
                 {
+                    var previous = Path.Combine(Data, "builtin-resource-sync", Path.GetFileName(dir), "previous");
+                    if (!Directory.Exists(old) && Directory.Exists(previous)) Directory.Move(previous, old);
                     if (!Directory.Exists(old)) continue;
-                    if (SameResources(dir, old)) { Directory.Delete(old, true); Log("自带角色改为直接从安装目录读，删掉数据目录里的镜像：" + old); }
-                    else Log("数据目录里的 " + old + " 和自带角色不一样，留着没删；显示用的是安装目录里的那份");
+                    using (var hash = SHA256.Create())
+                        if (!SameResources(dir, old, hash)) continue;
+                    // 先完整移出角色目录。即使个别文件被锁导致清理失败，也不会加载半删的角色。
+                    var duplicate = Path.Combine(Data, "builtin-duplicate-" + Guid.NewGuid().ToString("N"));
+                    Directory.Move(old, duplicate);
+                    try { Directory.Delete(duplicate, true); }
+                    catch (Exception e) { Log("清理已验证镜像失败 " + duplicate + ": " + e.Message); }
                 }
                 catch (Exception e) { Log("清理角色镜像失败 " + old + ": " + e.Message); }
             }
@@ -205,21 +213,39 @@ namespace Claudia
             return copy.Exists && copy.Length == source.Length && copy.LastWriteTimeUtc == source.LastWriteTimeUtc;
         }
 
-        static IEnumerable<string> ResourceDirs(string path) => Directory.EnumerateDirectories(path)
-            .Where(dir => !string.Equals(Path.GetFileName(dir), "raw", StringComparison.OrdinalIgnoreCase));
-
-        static bool SameResources(string src, string dst)
+        static bool SameResources(string src, string dst, HashAlgorithm hash)
         {
-            var files = Directory.GetFiles(src);
-            if (files.Length != Directory.GetFiles(dst).Length ||
-                files.Any(file => !SameFile(file, Path.Combine(dst, Path.GetFileName(file))))) return false;
-            var dirs = ResourceDirs(src).ToArray();
-            return dirs.Length == Directory.GetDirectories(dst).Length && dirs.All(dir =>
+            if (!Directory.Exists(dst) || IsLink(src) || IsLink(dst)) return false;
+            var source = Directory.GetFileSystemEntries(src)
+                .Where(entry => !Directory.Exists(entry) || !string.Equals(Path.GetFileName(entry), "raw", StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(entry => Path.GetFileName(entry), StringComparer.Ordinal);
+            var copies = Directory.GetFileSystemEntries(dst);
+            if (source.Count != copies.Length) return false;
+            // 先对比整个树的名字、类型和长度。旧版本通常在这一步就能排除。
+            foreach (var copy in copies)
             {
-                var copy = Path.Combine(dst, Path.GetFileName(dir));
-                return Directory.Exists(copy) && SameResources(dir, copy);
-            });
+                if (!source.TryGetValue(Path.GetFileName(copy), out var original) || IsLink(original) || IsLink(copy)) return false;
+                if (Directory.Exists(original) != Directory.Exists(copy)) return false;
+                if (File.Exists(original) && new FileInfo(original).Length != new FileInfo(copy).Length) return false;
+            }
+            foreach (var copy in copies)
+            {
+                var original = source[Path.GetFileName(copy)];
+                if (Directory.Exists(copy))
+                {
+                    if (!SameResources(original, copy, hash)) return false;
+                }
+                else
+                {
+                    using (var a = File.OpenRead(original))
+                    using (var b = File.OpenRead(copy))
+                        if (!hash.ComputeHash(a).SequenceEqual(hash.ComputeHash(b))) return false;
+                }
+            }
+            return true;
         }
+
+        static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
         /// <summary>扫描 characters/&lt;id&gt;/：character.json + 立绘</summary>
         // 立绘：<文件名去掉 -2、-3> 是姿态名，idle-blink 是眨眼帧（照着 idle 本身画的）
@@ -265,15 +291,17 @@ namespace Claudia
         public static Dictionary<string, object> Manifest()
         {
             var chars = new Dictionary<string, object>();
-            // 自带的（安装目录）加上用户另外添加的（数据目录）；重名的以自带的为准
+            var selected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var builtin = Directory.Exists(BuiltinCharacters) ? Directory.GetDirectories(BuiltinCharacters) : new string[0];
-            var dirs = builtin.Concat(Directory.GetDirectories(Characters).Where(d => !IsBuiltin(Path.GetFileName(d))))
-                .OrderBy(d => Path.GetFileName(d), StringComparer.Ordinal).ToList();
+            var user = Directory.Exists(Characters) ? Directory.GetDirectories(Characters) : new string[0];
+            // 同名角色先尝试数据目录；无有效待机素材时回退到内置。
+            var dirs = user.Concat(builtin).OrderBy(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase);
             foreach (var dir in dirs)
             {
+                var id = Path.GetFileName(dir);
+                if (selected.ContainsKey(id)) continue;
                 var info = ReadJson(Path.Combine(dir, "character.json"));
                 if (info == null) continue;
-                var id = Path.GetFileName(dir);
                 var (poses, blink, blinkBase) = Sprites(dir);
                 var sheets = Sheets(dir);
                 // 有待机立绘，或者有待机动画（2026-11-18 起 Claude 角色不再带静态的 idle.webp），才算一个角色
@@ -282,7 +310,9 @@ namespace Claudia
                 info["poses"] = poses; info["blink"] = blink; info["blinkBase"] = blinkBase;
                 info["sheets"] = sheets;
                 chars[id] = info;
+                selected[id] = dir;
             }
+            characterDirs = selected;
             return new Dictionary<string, object> { ["characters"] = chars };
         }
     }

@@ -1165,7 +1165,7 @@ class Pet:
             store.log("菜单出错: " + repr(e))
 
     def build_action_menu(self):
-        d = store.CHARACTERS / self.current
+        d = store.character_dir(self.current)
         if not d.is_dir():
             return None
         have = set()
@@ -1289,7 +1289,7 @@ class Pet:
     def settings_state(self):
         chars = []
         for cid, name in self.characters:
-            info = store.read_json(store.CHARACTERS / cid / "character.json") or {}
+            info = store.read_json(store.character_dir(cid) / "character.json") or {}
             chars.append({"id": cid, "name": name, "defaultName": info.get("name") or cid, "accent": info.get("accent"),
                           "custom": store.names().get(cid) or ""})
         hotkeys = [{"id": "off", "label": "不用快捷键"}] + [{"id": i, "label": label} for i, label, _ in system.CHOICES]

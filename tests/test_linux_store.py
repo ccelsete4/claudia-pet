@@ -1,5 +1,6 @@
-"""Linux built-in asset update regression tests. Run with python -B tests/test_linux_store.py."""
+"""Linux built-in role and migration tests. Run with python -B tests/test_linux_store.py."""
 
+import os
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ class ResourceUpdateTests(unittest.TestCase):
         assets = data / "characters"
         override = patch.multiple(
             store, INSTALL=root / "install", DATA=data, CHARACTERS=assets, STATE=data / "state",
+            _character_dirs={}, settings={"names": {}},
         )
         override.start()
         self.addCleanup(override.stop)
@@ -26,40 +28,59 @@ class ResourceUpdateTests(unittest.TestCase):
         self.active = assets / "claude"
         self.work = data / "builtin-resource-sync" / "claude"
         self.source.mkdir(parents=True)
-        self.active.mkdir(parents=True)
-        (self.source / "new.webp").write_bytes(b"new install")
-        (self.active / "old.webp").write_bytes(b"user's previous asset")
+        (self.source / "character.json").write_text("{}", encoding="utf-8")
+        (self.source / "idle.webp").write_bytes(b"built-in")
 
-    def test_failed_promotion_restores_previous_and_can_retry(self):
-        replace = store.os.replace
+    def make_local_role(self, contents):
+        self.active.mkdir()
+        (self.active / "character.json").write_text("{}", encoding="utf-8")
+        (self.active / "idle.webp").write_bytes(contents)
 
-        def fail_promotion(source, destination):
-            if source == self.work / "next":
-                raise OSError("injected failure after backing up active assets")
-            replace(source, destination)
+    def assert_route(self, expected):
+        self.assertIn("claude", store.manifest()["characters"])
+        root, mime = store.resolve_sprite("/characters/claude/idle.webp")
+        self.assertEqual(root, expected / "idle.webp")
+        self.assertEqual(mime, "image/webp")
 
-        with patch.object(store.os, "replace", side_effect=fail_promotion):
-            store.sync_resources()
-        self.assertEqual((self.active / "old.webp").read_bytes(), b"user's previous asset")
-        self.assertFalse((self.work / "previous").exists())
-
+    def test_reads_builtin_without_copy_and_retires_exact_mirror(self):
         store.sync_resources()
-        self.assertEqual((self.active / "new.webp").read_bytes(), b"new install")
-        self.assertFalse((self.active / "old.webp").exists())
-        self.assertFalse((self.work / "next").exists())
-        self.assertFalse((self.work / "previous").exists())
+        self.assert_route(self.source)
+        self.assertFalse(self.active.exists())
+        self.make_local_role(b"built-in")
+        store.sync_resources()
+        store.sync_resources()
+        self.assertFalse(self.active.exists())
+        self.assert_route(self.source)
 
-    def test_interrupted_update_recovers_before_trying_to_copy_again(self):
+    def test_keeps_same_size_local_edit_and_falls_back_if_incomplete(self):
+        store.sync_resources()
+        self.make_local_role(b"modified")
+        original = (self.source / "idle.webp").stat()
+        os.utime(self.active / "idle.webp", ns=(original.st_atime_ns, original.st_mtime_ns))
+        store.sync_resources()
+        self.assertEqual((self.active / "idle.webp").read_bytes(), b"modified")
+        self.assert_route(self.active)
+        (self.active / "idle.webp").unlink()
+        self.assert_route(self.source)
+
+    def test_interrupted_old_update_recovers_previous(self):
+        store.sync_resources()
+        self.make_local_role(b"modified")
         self.work.mkdir(parents=True)
         self.active.rename(self.work / "previous")
-        (self.work / "next").mkdir()
-        (self.work / "next" / "partial.webp").write_bytes(b"incomplete")
-
-        with patch.object(store, "_copy_dir", side_effect=OSError("injected copy failure")):
-            store.sync_resources()
-        self.assertEqual((self.active / "old.webp").read_bytes(), b"user's previous asset")
-        self.assertFalse((self.work / "next").exists())
+        store.sync_resources()
         self.assertFalse((self.work / "previous").exists())
+        self.assert_route(self.active)
+
+    def test_failed_move_leaves_mirror_in_place_and_can_retry(self):
+        store.sync_resources()
+        self.make_local_role(b"built-in")
+        with patch.object(store.os, "rename", side_effect=OSError("injected move failure")):
+            store.sync_resources()
+        self.assert_route(self.active)
+        store.sync_resources()
+        self.assertFalse(self.active.exists())
+        self.assert_route(self.source)
 
 
 if __name__ == "__main__":

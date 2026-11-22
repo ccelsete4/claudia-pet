@@ -2,16 +2,18 @@
 
 数据目录和 Windows 版一样是 ~/.claudia：Claude Code 插件往 ~/.claudia/state 写状态，两边的插件代码共用。
 """
+import hashlib
 import json
 import os
 import shutil
 import sys
 import time
 import urllib.parse
+import uuid
 from pathlib import Path
 
 APP_NAME = "claudia-pet"
-# 网页从两个「主机」读文件：claudia://app/（安装目录/web）和 claudia://data/characters/…（数据目录里的立绘），见 web.py
+# 网页从两个「主机」读文件：claudia://app/（安装目录/web）和 claudia://data/characters/…（安装目录或数据目录的立绘），见 web.py
 SCHEME = "claudia"
 APP_HOST, DATA_HOST = "app", "data"
 ANIM_DIR = "anim"
@@ -236,8 +238,14 @@ def set_standalone(on):
     _run_checked = 0.0
 
 
-# ---------------- 内置素材同步 ----------------
-# 安装目录里的 characters 同步到数据目录（用户可以在那里改立绘）；只在有变化时复制
+# ---------------- 内置素材 ----------------
+_character_dirs = {}
+
+
+def character_dir(cid):
+    return _character_dirs.get(cid, CHARACTERS / cid)
+
+
 def _same_file(src, dst):
     try:
         a, b = src.stat(), dst.stat()
@@ -246,76 +254,71 @@ def _same_file(src, dst):
     return a.st_size == b.st_size and int(a.st_mtime) == int(b.st_mtime)
 
 
-def _resource_dirs(path):
-    return [d for d in sorted(path.iterdir()) if d.is_dir() and d.name.lower() != "raw"]
+def _digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(256 * 1024), b""):
+            digest.update(block)
+    return digest.digest()
 
 
 def _same_resources(src, dst):
-    if not dst.is_dir():
+    if src.is_symlink() or dst.is_symlink() or os.path.ismount(dst) or not dst.is_dir():
         return False
-    files = [f for f in src.iterdir() if f.is_file()]
-    if len(files) != len([f for f in dst.iterdir() if f.is_file()]):
+    originals = {p.name: p for p in src.iterdir() if not (p.is_dir() and p.name.lower() == "raw")}
+    copies = {p.name: p for p in dst.iterdir()}
+    if originals.keys() != copies.keys():
         return False
-    if any(not _same_file(f, dst / f.name) for f in files):
-        return False
-    dirs = _resource_dirs(src)
-    if len(dirs) != len([d for d in dst.iterdir() if d.is_dir()]):
-        return False
-    return all(_same_resources(d, dst / d.name) for d in dirs)
-
-
-def _copy_dir(src, dst):
-    dst.mkdir(parents=True, exist_ok=True)
-    for f in src.iterdir():
-        if f.is_file():
-            shutil.copy2(f, dst / f.name)
-    for d in _resource_dirs(src):
-        _copy_dir(d, dst / d.name)
+    for name, copy in copies.items():
+        original = originals[name]
+        if original.is_symlink() or copy.is_symlink() or original.is_dir() != copy.is_dir():
+            return False
+        if not copy.is_dir() and (
+            not original.is_file() or not copy.is_file() or original.stat().st_size != copy.stat().st_size
+        ):
+            return False
+    for name, copy in copies.items():
+        original = originals[name]
+        if copy.is_dir():
+            if not _same_resources(original, copy):
+                return False
+        elif _digest(original) != _digest(copy):
+            return False
+    return True
 
 
 def sync_resources():
     CHARACTERS.mkdir(parents=True, exist_ok=True)
     STATE.mkdir(parents=True, exist_ok=True)
     src = INSTALL / "characters"
-    if not src.is_dir() or src.resolve() == CHARACTERS.resolve():
+    if not src.is_dir() or src.resolve() == CHARACTERS.resolve() or CHARACTERS.is_symlink():
         return
     for d in sorted(src.iterdir()):
         if not d.is_dir():
             continue
         dst = CHARACTERS / d.name
         try:
-            work = DATA / "builtin-resource-sync" / d.name
-            staged, previous = work / "next", work / "previous"
-            if previous.exists():
-                if dst.exists():
-                    shutil.rmtree(previous)
-                else:
-                    os.replace(previous, dst)
-            if staged.exists():
-                shutil.rmtree(staged)
-            if _same_resources(d, dst):
+            previous = DATA / "builtin-resource-sync" / d.name / "previous"
+            if not dst.exists() and not dst.is_symlink() and previous.is_dir():
+                os.replace(previous, dst)
+            if not _same_resources(d, dst):
                 continue
-            _copy_dir(d, staged)
-            if dst.exists():
-                os.replace(dst, previous)
+            # Leave the active directory intact if moving it fails. A failed cleanup
+            # after moving cannot make a partially deleted character visible.
+            duplicate = DATA / ("builtin-duplicate-" + uuid.uuid4().hex)
+            os.rename(dst, duplicate)
             try:
-                os.replace(staged, dst)
-            except OSError:
-                if previous.exists():
-                    os.replace(previous, dst)
-                raise
-            if previous.exists():
-                shutil.rmtree(previous)
-            log("同步角色素材：" + d.name)
+                shutil.rmtree(duplicate)
+            except OSError as e:
+                log(f"清理已验证镜像失败 {duplicate}: {e}")
         except OSError as e:
-            log(f"同步角色失败 {d}: {e}")
+            log(f"清理角色镜像失败 {dst}: {e}")
     for md in src.glob("*.md"):
         try:
             if not _same_file(md, CHARACTERS / md.name):
                 shutil.copy2(md, CHARACTERS / md.name)
         except OSError as e:
             log(f"同步说明文件失败 {md}: {e}")
-
 
 # ---------------- 角色清单 ----------------
 def is_sprite(stem):
@@ -352,27 +355,33 @@ def _sheets(d):
 
 
 def manifest():
-    chars = {}
-    if CHARACTERS.is_dir():
-        for d in sorted((x for x in CHARACTERS.iterdir() if x.is_dir()), key=lambda x: x.name):
-            info = read_json(d / "character.json")
-            if info is None:
+    global _character_dirs
+    chars, selected = {}, {}
+    dirs = [d for root in (CHARACTERS, INSTALL / "characters") if root.is_dir()
+            for d in root.iterdir() if d.is_dir()]
+    for d in sorted(dirs, key=lambda x: x.name):
+        if d.name in selected:
+            continue
+        info = read_json(d / "character.json")
+        if info is None:
+            continue
+        poses, blink, blink_base = _sprites(d)
+        sheets = _sheets(d)
+        if "idle" not in poses and "default" not in poses:
+            animations = info.get("animations")
+            idle = animations.get("idle") if isinstance(animations, dict) else None
+            idle_sheets = idle.get("sheets") if isinstance(idle, dict) else None
+            if not isinstance(idle_sheets, list) or not any(
+                isinstance(name, str) and name in sheets for name in idle_sheets
+            ):
                 continue
-            poses, blink, blink_base = _sprites(d)
-            sheets = _sheets(d)
-            if "idle" not in poses and "default" not in poses:
-                animations = info.get("animations")
-                idle = animations.get("idle") if isinstance(animations, dict) else None
-                idle_sheets = idle.get("sheets") if isinstance(idle, dict) else None
-                if not isinstance(idle_sheets, list) or not any(
-                    isinstance(name, str) and name in sheets for name in idle_sheets
-                ):
-                    continue
-            custom = names().get(d.name)
-            if isinstance(custom, str) and custom.strip():
-                info["name"] = custom.strip()
-            info.update(poses=poses, blink=blink, blinkBase=blink_base, sheets=sheets)
-            chars[d.name] = info
+        custom = names().get(d.name)
+        if isinstance(custom, str) and custom.strip():
+            info["name"] = custom.strip()
+        info.update(poses=poses, blink=blink, blinkBase=blink_base, sheets=sheets)
+        chars[d.name] = info
+        selected[d.name] = d
+    _character_dirs = selected
     return {"characters": chars}
 
 
@@ -389,7 +398,7 @@ def resolve_sprite(path):
     ext = os.path.splitext(name)[1].lower()
     if ext not in (".webp", ".png"):
         return None
-    root = CHARACTERS.resolve()
+    root = character_dir(character).parent.resolve()
     full = (root / character / ANIM_DIR / name) if anim else (root / character / name)
     full = full.resolve()
     if root not in full.parents:
