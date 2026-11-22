@@ -59,7 +59,7 @@
 | 工作状态-垂头叹气冒汗.webp | oops 哎呀（2026-11-07 起替换静态图 oops.webp） | 整段 |
 | 拆礼物.webp | update 拆礼物（2026-11-07 起替换静态图 update.webp「抱礼物」；没有专门的触发时机，放在玩耍组闲置随机） | 整段 |
 | 伸脚趾、咬指甲、抓痒、抖腿、掰手指、揉眼睛、摸肚子、甩手甩水、转手腕、转笔.webp | 发呆小动作 toes、nails、scratch、leg_bounce、finger_count、eye_rub、tummy、hand_flick、wrist_roll、pen_spin | 闲置随机，整段 |
-| 吹叶笛、弹玻璃杯沿、弹空气吉他、弹空气吉他v2、弹空气吉他v3、手摇八音盒、敲木鱼、淑女屈膝礼.webp | 才艺 leaf_flute、glass_harp、air_guitar、music_box、woodfish、curtsy | 闲置随机，整段 |
+| 吹叶笛、弹玻璃杯沿、弹空气吉他、弹空气吉他v3、手摇八音盒、敲木鱼、淑女屈膝礼.webp | 才艺 leaf_flute、glass_harp、air_guitar、music_box、woodfish、curtsy | 闲置随机，整段 |
 | 叠叠乐、吹蒲公英、弹脑门、戳泡泡纸、打水漂、抖空竹、抛帽接帽、抛接小苹果、摇骰盅、翻花绳、踩影子、转伞、转盘子.webp | 玩耍 jenga、dandelion、forehead_flick、bubble_wrap、skip_stone、diabolo、hat_toss、apple_toss、dice、cats_cradle、shadow_step、umbrella_spin、plate_spin | 闲置随机，整段 |
 | 分巧克力、刨冰屑、剥栗子、吸布丁、咬脆饼、啃玉米、喝汤吹凉、挑鱼刺、捏饭团、摇汽水瓶、烤红薯、舀蜂蜜v2.webp | 吃喝 chocolate、shaved_ice（6、7、8 月）、chestnut（9、10、11 月）、pudding、cracker、corn（7、8、9、10 月）、soup、fishbone、onigiri、soda（5、6、7、8、9 月）、sweet_potato（11、12、1、2 月）、honey | 闲置随机，整段 |
 | 举手遮阳偷看、原地踏雪、听蝉、抱暖手炉、掌心接雪花、接雨滴、搓手哈气取暖、撑透明小伞、被风吹乱发型.webp | 时令 sunshade（5、6、7、8、9 月）、snow_step（12、1、2 月）、cicada（6、7、8 月）、hand_warmer（11、12、1、2 月）、snowflake（12、1、2 月）、raindrop（3、4、5、6、7 月）、warm_breath（11、12、1、2 月）、clear_umbrella（3、4、5、6、7 月）、windy（3、4、10、11 月） | 闲置随机，整段 |
@@ -67,6 +67,8 @@
 | 拨算盘珠、深度思考碎碎念v4.webp | Claude 梗 abacus、mutter_lazy | 闲置随机，整段 |
 
 2026-11-09 删掉其中 16 张（随机动作太多，随时能触发的从 96 个减到 80 个，和 dsh-pet 的 80 个相当）：发呆小动作 抠鼻子、挠脚心、揪耳朵、憋气鼓腮；才艺 打拍子数拍、按音叉、摇沙锤、敲三角铁、摇小风铃；手工 削铅笔、扎束干花、打铁小铃、描瓷纹、糊纸伞骨、绕线轴、缝布偶。要找回从作者库 `da5a6fe` 取。
+
+2026-11-22 删掉 弹空气吉他v2.webp（issue #1「吉他只空气了一半」）：这一版里吉他只画了琴颈、没有琴身，作者原件就是这样（和作者库 `da5a6fe` 的文件哈希一致），不是我们裁的。空气吉他 air_guitar 改成 v1（真吉他）和 v3（手里没吉他）两版轮换。
 
 圣诞 fest_christmas 加入 装点圣诞树.webp，和装点圣诞树v3 随机轮换。
 

@@ -423,7 +423,7 @@
     "pen_spin": { "sheets": ["转笔"], "full": true, "idle": "fidget" },
     "leaf_flute": { "sheets": ["吹叶笛"], "full": true, "idle": "talent" },
     "glass_harp": { "sheets": ["弹玻璃杯沿"], "full": true, "idle": "talent" },
-    "air_guitar": { "sheets": ["弹空气吉他", "弹空气吉他v2", "弹空气吉他v3"], "full": true, "idle": "talent" },
+    "air_guitar": { "sheets": ["弹空气吉他", "弹空气吉他v3"], "full": true, "idle": "talent" },
     "music_box": { "sheets": ["手摇八音盒"], "full": true, "idle": "talent" },
     "woodfish": { "sheets": ["敲木鱼"], "full": true, "idle": "talent" },
     "curtsy": { "sheets": ["淑女屈膝礼"], "full": true, "idle": "talent" },
