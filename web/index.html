@@ -9,8 +9,9 @@ html, body { margin: 0; background: transparent; overflow: hidden; -webkit-user-
 /* 从下往上排：底栏（名牌 + 额度）固定高度贴着窗口底边，人物在它上面，气泡从人物头顶往上长。
    这样名牌开关、额度有几行、台词有多长，人物都不挪位置，额度也不会被长台词挤出窗口
    （Windows 上微软雅黑行高大，之前开着名牌、台词折两三行时额度会被挤出去） */
-#wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100vh; }
+#wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: var(--fit-h, 100vh); }
 #wrap > * { flex-shrink: 0; }
+#fit { transform-origin: 0 0; }   /* 网页实际拿到的大小和画布对不上时整体等比缩放（见 refit） */
 /* 底栏最小高度按 max(1, k)：字比人小时不缩，人物不往下掉 */
 #foot { min-height: calc(62px * max(1, var(--k))); flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
 #bubble { position: relative; z-index: 3; margin-bottom: calc(-10px * var(--k)); max-width: calc(228px * var(--k)); min-height: calc(18px * var(--k));
@@ -195,7 +196,7 @@ html.no-name #caption { display: none; }
 @keyframes jolt { 0% { transform: translate(0,0) rotate(0); } 25% { transform: translate(-3%, -4%) rotate(-4deg) scale(.97,1.04); } 60% { transform: translate(1%, 0) rotate(1.5deg); } 100% { transform: none; } }
 </style></head>
 <body>
-<div id="wrap">
+<div id="fit"><div id="wrap">
   <div id="bubble" class="hide"></div>
   <div id="stage">
     <div id="aura"></div><div id="shadow"></div>
@@ -205,7 +206,7 @@ html.no-name #caption { display: none; }
     <div id="poof"><i style="--dx:-60px;--dy:-30px"></i><i style="--dx:55px;--dy:-35px"></i><i style="--dx:-45px;--dy:40px"></i><i style="--dx:50px;--dy:35px"></i><i style="--dx:0;--dy:-60px"></i></div>
   </div>
   <div id="foot"><div id="caption"></div><div id="quota"></div></div>
-</div>
+</div></div>
 <script>
 addEventListener('error', e => {
   if (!(e.target && e.target.tagName === 'IMG' && e.target.src)) return
@@ -500,7 +501,7 @@ function startWalk(p, dir = 0, retried = false) {
   const w = walking, [lo, hi] = a.walk.ms || [3000, 6000], ms = Math.round(lo + Math.random() * (hi - lo))
   const go = () => {
     if (walking !== w || pose !== p) return
-    const speed = $('body').offsetHeight * a.walk.speed * (window.devicePixelRatio || 1)   // 每秒走人物身高的几成（物理像素）
+    const speed = $('body').offsetHeight * fit * a.walk.speed * (window.devicePixelRatio || 1)   // 每秒走人物身高的几成（物理像素；画面被等比缩放时按实际画出来的身高，见 refit）
     window.chrome.webview.postMessage({ walk: { dir, speed: Math.round(speed), ms } })
     clearTimeout(walkTimer)
     walkTimer = setTimeout(() => { if (walking === w) walkEnded('done') }, ms + 3000)   // 外壳没回话也别一直原地踏步
@@ -548,7 +549,69 @@ function setShowName(on) { document.documentElement.classList.toggle('no-name', 
 function setSizes(size, textSize, linked) {
   const L = TextSize.layout(size, TextSize.effectiveText(size, textSize, linked))
   document.documentElement.style.setProperty('--k', String(L.k))
+  canvasW = L.w; canvasH = L.h
+  refit()
   return JSON.stringify({ w: L.w, h: L.h, foot: L.foot })
+}
+// ---- 网页自己铺满窗口（照 CrossPet 1.3.9 的 refit）----
+// 外壳按「画布 × 人物大小」设窗口、按人物大小设网页缩放，正常时网页正好是画布大小。Windows 上 WebView2 偶尔多乘或少乘一个比例
+// （系统缩放算两遍、系统「辅助功能 → 文本大小」不是 100%……），网页就比画布大或小；#wrap 底边对齐，被挤出去的总是顶上的气泡
+// （issue #2：4K、150%～169%，气泡只露下沿）。与其一种种认原因，不如量自己实际拿到多大：对不上就把整个画面等比缩放、底边居中铺进去。
+// 对外（hitRects）一律用画布坐标，外壳那边的换算不用变；对得上时 fit = 1，什么都不动。
+// 换屏后网页区域停在旧缩放上那种（网页只占窗口一角）这里只能缩小塞进去，真正的修法在外壳：CheckZoom 补对齐、重建网页控件
+let canvasW = 0, canvasH = 0, fit = 1, fitX = 0, fitY = 0
+function refit() {
+  const box = $('fit'), vw = innerWidth, vh = innerHeight
+  let f = canvasW > 0 && canvasH > 0 && vw > 0 && vh > 0 ? Math.min(vw / canvasW, vh / canvasH) : 1
+  if (Math.abs(f - 1) < 0.015) f = 1   // 取整误差
+  fit = f
+  if (f === 1) {
+    fitX = fitY = 0
+    box.style.width = box.style.height = box.style.transform = ''
+    document.documentElement.style.removeProperty('--fit-h')
+    return
+  }
+  fitX = (vw - canvasW * f) / 2; fitY = vh - canvasH * f   // 左右居中、底边对齐（和平时 #wrap 的排法一样）
+  box.style.width = canvasW + 'px'; box.style.height = canvasH + 'px'
+  box.style.transform = `translate(${fitX}px, ${fitY}px) scale(${f})`
+  document.documentElement.style.setProperty('--fit-h', canvasH + 'px')
+}
+addEventListener('resize', refit)
+// 网页坐标（getBoundingClientRect 量的）→ 画布坐标
+function toCanvas(r) { return { left: (r.left - fitX) / fit, top: (r.top - fitY) / fit, width: r.width / fit, height: r.height / fit } }
+// ---- 鼠标交给外壳（Windows 的 DirectHost，照 CrossPet）----
+// Windows 外壳的窗口由系统直接合成（app/src/DirectHost.cs），没有那层接鼠标的透明画布了，鼠标直接落到网页上。
+// 外壳调 setPointerBridge(true) 后，按下、拖动、单击、右键都交给外壳照旧处理（摸头 / 拖动和甩 / 菜单），网页自己不响应：
+//   { pointer: 'down' }               左键按下：外壳记下按下时鼠标在屏幕上的位置（拖动物理要知道从哪儿拎起来的）
+//   { pointer: 'drag' }               按住移动超过 4 像素：外壳接手拖动（之后的轨迹外壳从系统鼠标历史取，见 Pet.Physics.cs）
+//   { pointer: 'click', x, y }        单击（没拖），x、y 是画布坐标
+//   { pointer: 'menu' }               右键
+// Linux 外壳自己在 GTK 里接鼠标，不调 setPointerBridge，这段不起作用
+let pointerBridge = false
+function setPointerBridge(on) { pointerBridge = !!on }
+{
+  const toShell = msg => { try { window.chrome?.webview?.postMessage(msg) } catch {} }
+  let down = null
+  const swallow = e => { if (pointerBridge) { e.preventDefault(); e.stopPropagation() } }
+  addEventListener('mousedown', e => {
+    if (!pointerBridge) return
+    swallow(e)
+    if (e.button === 0) { down = { x: e.screenX, y: e.screenY }; toShell({ pointer: 'down' }) }
+  }, true)
+  addEventListener('mousemove', e => {
+    if (!pointerBridge || !down) return
+    if (!(e.buttons & 1)) { down = null; return }
+    if (Math.abs(e.screenX - down.x) + Math.abs(e.screenY - down.y) > 4) { down = null; toShell({ pointer: 'drag' }) }
+  }, true)
+  addEventListener('mouseup', e => {
+    if (!pointerBridge) return
+    swallow(e)
+    if (e.button !== 0 || !down) return
+    down = null
+    toShell({ pointer: 'click', x: Math.round((e.clientX - fitX) / fit * 10) / 10, y: Math.round((e.clientY - fitY) / fit * 10) / 10 })
+  }, true)
+  for (const t of ['click', 'dblclick', 'auxclick']) addEventListener(t, swallow, true)
+  addEventListener('contextmenu', e => { if (!pointerBridge) return; swallow(e); toShell({ pointer: 'menu' }) }, true)
 }
 // 背景光晕：'auto'（跟着系统深浅色）/ 'on' / 'off'，由宿主调用
 function setAuraMode(mode) {
@@ -557,7 +620,7 @@ function setAuraMode(mode) {
   c.toggle('aura-off', mode === 'off')
   updateAnimationTimers()
 }
-// 能点到的区域（网页像素，[x, y, 宽, 高]）：桌宠本体、气泡、名牌、额度。窗口其余透明的地方让点击穿过去，
+// 能点到的区域（画布像素，[x, y, 宽, 高]；画面被等比缩放时换算回画布坐标，见 refit）：桌宠本体、气泡、名牌、额度。窗口其余透明的地方让点击穿过去，
 // 点到后面的窗口（窗口比桌宠大，是给动作、气泡留的空间）
 const hitElements = ['body', 'bubble', 'caption', 'quota'].map($)
 const hitTransformElements = ['body', 'bubble', 'stage', 'impact'].map($)
@@ -568,7 +631,7 @@ function hitRects() {
     if ((el.id === 'bubble' && el.classList.contains('hide')) || el.classList.contains('hidden')) continue
     const cs = getComputedStyle(el)
     if (cs.display === 'none' || cs.visibility === 'hidden') continue
-    const r = el.getBoundingClientRect()
+    const r = toCanvas(el.getBoundingClientRect())
     if (r.width < 1 || r.height < 1) continue
     out.push([r.left - 4, r.top - 4, r.width + 8, r.height + 8].map(Math.round))
   }

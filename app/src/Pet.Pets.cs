@@ -31,7 +31,6 @@ namespace Claudia
             shownInClaude = false; lastClaude = null; topmostAt = DateTime.MinValue;
             if (!desktop)
             {
-                if (Window != null && Window.Topmost) Window.Topmost = false;
                 Native.SetWindowPos(hwnd, Native.HWND_NOTOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
             }
             PlaceHome();

@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Interop;
+using System.Drawing;
 
 namespace Claudia
 {
-    // Test-only partial class: calls the real mouse-up handoff against an unshown WPF HWND.
+    // Test-only partial class: calls the real mouse-up handoff against an unshown DirectHost HWND.
     sealed partial class Pet
     {
         public static void TestHandoff()
@@ -22,31 +20,28 @@ namespace Claudia
             Check(policy.Accept("anywhere", "waiting", 113, 113, true, true, false), "Always-notify option failed");
             Console.WriteLine("PASS: notification freshness, foreground gating, duplicate/burst suppression and category switches");
             Store.Settings = new Dictionary<string, object>(); // Test process only; no user files touched.
-            var input = new Pet(null) { Window = new Window { Width = 260 }, hit = new Canvas(), ready = true };
+
+            // Hit rectangles arrive in canvas pixels and must reach the window in physical pixels (window width / canvas width).
+            var input = new Pet(null) { Host = new DirectHost("test", 260, 362), ready = true };
             input.hitRects = new object[] { new object[] { 10, 15, 50, 30 } };
             input.UpdateHitRects();
-            var box = (FrameworkElement)input.hit.Children[0];
-            Check(Canvas.GetLeft(box) == 10 && box.Width == 50, "Reported hit rectangle was not applied");
+            var applied = input.Host.HitRects;
+            Check(applied.Count == 1 && applied[0] == new Rectangle(10, 15, 50, 30), "Reported hit rectangle was not applied");
             input.UpdateHitRects();
-            Check(input.hit.Children[0] == box, "Unchanged hit geometry was rebuilt");
-            input.Window.Width = 520;
+            Check(ReferenceEquals(input.Host.HitRects, applied), "Unchanged hit geometry was rebuilt");
+            input.Host.Width = 520;
             input.UpdateHitRects();
-            box = (FrameworkElement)input.hit.Children[0];
-            Check(Canvas.GetLeft(box) == 20 && box.Width == 100, "Cached hit rectangle was not rescaled");
-            input.Window.Close();
+            Check(input.Host.HitRects.Count == 1 && input.Host.HitRects[0] == new Rectangle(20, 30, 100, 60), "Cached hit rectangle was not rescaled");
+            input.Host.Dispose();
             Console.WriteLine("PASS: reported hit geometry is reused and rescaled on resize");
+
             foreach (var direction in new[] { -1, 1 })
             {
                 var pet = new Pet(null);
-                pet.Window = new Window { Width = 260, Height = 362, Left = 400, Top = 300,
-                    WindowStyle = WindowStyle.None, AllowsTransparency = true };
-                pet.hwnd = new WindowInteropHelper(pet.Window).EnsureHandle();
+                pet.Host = new DirectHost("test", 260, 362) { Bounds = new Rectangle(400, 300, 260, 362) };
                 var moves = 0;
-                HwndSource.FromHwnd(pet.hwnd).AddHook((IntPtr hwnd, int msg, IntPtr wp, IntPtr lp, ref bool handled) =>
-                {
-                    if (msg == 0x0046) moves++; // WM_WINDOWPOSCHANGING
-                    return IntPtr.Zero;
-                });
+                pet.Host.MessageHook = (msg, wp) => { if (msg == 0x0046) moves++; return false; };   // WM_WINDOWPOSCHANGING
+                pet.hwnd = pet.Host.Handle;   // creates the HWND without showing it
                 Native.GetWindowRect(pet.hwnd, out var before);
                 pet.motionId = 73;
                 pet.dragging = true;
@@ -70,9 +65,9 @@ namespace Claudia
                 Native.GetWindowRect(pet.hwnd, out after);
                 Check(after.Left == before.Left + direction * 10, "Old gesture frame was accepted");
                 pet.StopMotion(false);
-                pet.Window.Close();
+                pet.Host.Dispose();
             }
-            Console.WriteLine("PASS: real WPF handoff preserves position and skips stale and duplicate window moves");
+            Console.WriteLine("PASS: real DirectHost handoff preserves position and skips stale and duplicate window moves");
         }
         static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
     }

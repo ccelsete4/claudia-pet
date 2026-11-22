@@ -93,7 +93,7 @@ namespace Claudia
             Native.GetWindowRect(hwnd, out var r);
             var pointer = Forms.Cursor.Position;
             dragging = true; dragTick0 = Environment.TickCount; sentAny = false;
-            CompositionTarget.Rendering -= PumpOnFrame; CompositionTarget.Rendering += PumpOnFrame;
+            StartDragPump();
             packet["x"] = r.Left; packet["y"] = r.Top;
             packet["downX"] = downX; packet["downY"] = downY;
             packet["px"] = pointer.X; packet["py"] = pointer.Y; packet["time"] = 0;
@@ -162,9 +162,22 @@ namespace Claudia
             return (GetAsyncKeyState(vk) & 0x8000) != 0;
         }
         bool releasedEarly;   // 已按上面的办法松手了，迟到的鼠标消息只收尾，不算单击、不再开始拖动
+        // 拖动中每帧交一次轨迹、看一次按键。以前挂在 WPF 的 CompositionTarget.Rendering（每画一帧来一次）上；
+        // 换成 DirectHost 后屏幕上没有 WPF 窗口在画，它不一定还来，改用 16 毫秒（约 60 次 / 秒）的计时器，优先级和画面刷新一样
+        DispatcherTimer dragPump;
+        void StartDragPump()
+        {
+            if (dragPump == null)
+            {
+                dragPump = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
+                dragPump.Tick += PumpOnFrame;
+            }
+            dragPump.Start();
+        }
+        void StopDragPump() => dragPump?.Stop();
         void PumpOnFrame(object sender, EventArgs e)
         {
-            if (!dragging) { CompositionTarget.Rendering -= PumpOnFrame; return; }
+            if (!dragging) { StopDragPump(); return; }
             if (!PrimaryButtonDown()) { releasedEarly = true; EndDrag(Environment.TickCount); return; }
             PumpDragPointer((uint)Environment.TickCount);
         }
@@ -177,7 +190,7 @@ namespace Claudia
             Native.GetWindowRect(hwnd, out var r);
             // Once released, reject any old drag-frame messages still queued by WebView2.
             dragging = false; flying = true;
-            CompositionTarget.Rendering -= PumpOnFrame;
+            StopDragPump();
             var upMs = DragMs((uint)upTimestamp);
             Js($"petMotion.end({{id:{motionId},x:{r.Left},y:{r.Top},time:{Num(upMs)}}})");
         }
@@ -186,7 +199,7 @@ namespace Claudia
             var moved = dragging || flying;
             ++motionId; dragging = flying = false;
             lastMotionPosition = null;
-            CompositionTarget.Rendering -= PumpOnFrame;
+            StopDragPump();
             if (moved) Js("petMotion.stop(); setMotionActive(false)");
             if (moved && save && hwnd != IntPtr.Zero) SavePosition();
         }

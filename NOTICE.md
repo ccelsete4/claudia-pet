@@ -6,6 +6,8 @@ claudia-pet 作为独立项目维护，基于 [CrossPet](https://github.com/loki
 
 项目代码采用 MIT 协议。CrossPet 的版权与许可见 [LICENSE](LICENSE) 和 [原始许可](upstream/CrossPet-LICENSE)；来源版本记录见 `upstream/CrossPet-VERSION`。
 
+此后从 CrossPet 较新版本（v1.3.9 / v1.4.0，同为 MIT）移植的部分：Windows 外壳的桌宠窗口 `app/src/DirectHost.cs`（系统直接合成的透明窗口、按能点区域切鼠标穿透，取自 CrossPet `app/windows/src/DirectHost.cs` 并改写），网页 `web/index.html` 里的 `refit`（网页实际大小和画布对不上时整体等比铺满窗口）和 `setPointerBridge`（鼠标交给外壳）。
+
 `web/dsh-physics.js` 直接摘录 dsh-pet 的 `runtime/electron-helper/shared-core.js` 中独立的物理函数；网页物理适配器按其桌面驱动方式接入。右键「动作 → 分组 → 具体动作」菜单和白底圆角的柔和菜单样式参照 dsh-pet 的交互与样式，由本项目自行实现（悬停色改为浅橙）。dsh-pet 的版权和 MIT 许可全文保留在本文末尾。
 
 ## 角色素材与图标

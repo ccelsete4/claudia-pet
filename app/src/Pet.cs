@@ -13,23 +13,24 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
+using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 
 namespace Claudia
 {
     /// <summary>
-    /// 桌宠本体：透明、不抢焦点的 WPF 窗口承载 web/index.html，跟随 Claude 主窗口。
+    /// 桌宠本体：透明、不抢焦点的窗口承载 web/index.html，跟随 Claude 主窗口。
     /// 读取 Claude 插件的状态与额度，管理互动、托盘、通知及设置。
-    /// 网页用 WebView2CompositionControl：它把网页画面当图片放进 WPF 透明窗口，才能做到逐像素半透明（柔和边缘、光晕）。
+    /// 窗口是 DirectHost（2026-11-22 照 CrossPet 换的）：网页由系统直接合成，逐像素半透明（柔和边缘、光晕），
+    /// 换屏换缩放跟着走，画面也不经界面线程。以前的 WPF 透明窗口 + WebView2CompositionControl 为什么换掉，见 DirectHost.cs
     /// </summary>
     sealed partial class Pet
     {
         CoreWebView2Environment env;   // 浏览器进程崩溃后要换一个新的（见 RecoverWeb）
-        Grid grid;
-        public Window Window { get; private set; }
-        WebView2CompositionControl web;
+        public DirectHost Host { get; private set; }
+        WebView2 web;
+        readonly Dispatcher ui = Dispatcher.CurrentDispatcher;
         IntPtr hwnd;
         bool ready;
         string current;
@@ -63,37 +64,28 @@ namespace Claudia
             Store.Log($"运行方式：{(wasStandalone ? "独立运行" : "跟着 Claude")}，{(desktopMode ? "待在桌面上" : "待在 Claude 窗口里")}");
             current = Store.Settings.TryGetValue("character", out var c) && c is string s ? s : "claude";
 
-            Window = new Window
+            // 先放屏幕外，拿到窗口句柄后按像素摆到保存的位置（大小在 HandleCreated 里按当时所在屏幕的缩放重设）
+            Host = new DirectHost(Store.AppName, (int)Math.Round(BaseWidth * Scale), (int)Math.Round(BaseHeight * Scale));
+            web = Host.Web;
+            Host.MessageHook = HotKeyHook;   // 快捷键只有第一只注册（RegisterHideHotKey），别的几只收不到 WM_HOTKEY
+            Host.HandleCreated += (_, __) =>
             {
-                Title = Store.AppName, WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
-                Width = BaseWidth * Scale, Height = BaseHeight * Scale, Topmost = false, ShowInTaskbar = false, ShowActivated = false, ResizeMode = ResizeMode.NoResize,
-                Left = -10000, Top = -10000,   // 先放屏幕外，拿到窗口句柄后按像素摆到保存的位置
-            };
-            Window.SourceInitialized += (_, __) =>
-            {
-                hwnd = new WindowInteropHelper(Window).Handle;
-                Native.MakeToolWindow(hwnd);
+                hwnd = Host.Handle;
+                ResizeHost(Scale);
                 RestorePosition();
-                HwndSource.FromHwnd(hwnd)?.AddHook(HotKeyHook);
                 RegisterHideHotKey();
             };
-
-            grid = new Grid();
-            web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.Transparent, IsHitTestVisible = false };
-            grid.Children.Add(web);
-            // 透明的接鼠标层：拖动 / 单击 / 右键由窗口自己处理，网页只负责画
-            // 只在桌宠本体、气泡、名牌、额度上铺：窗口其余地方完全透明，点击直接落到后面的窗口
-            // （窗口比桌宠大，是给动作、气泡留的空间；透明窗口里全透明的像素本来就不接鼠标）
-            hit = new Canvas();
-            grid.Children.Add(hit);
-            Window.Content = grid;
-            WireMouse(hit);
-
-            // 换 DPI 时 WPF 先按新缩放排好窗口再发这个事件；等这一轮排版走完再让网页控件对齐（原因见 ResyncWebForDpi）
-            Window.DpiChanged += (_, e) => Window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
-                new Action(() => ResyncWebForDpi(e.OldDpi.DpiScaleX, e.NewDpi.DpiScaleX)));
-            Window.Loaded += async (_, __) => await InitWeb();
-            Window.Show();
+            // 拖动 / 单击 / 右键：网页收到鼠标后交给外壳（pointer 消息，见 Pet.Mouse.cs 的 HandlePointer）；
+            // 鼠标只在桌宠本体、气泡、名牌、额度上才接（hitRects，见 UpdateHitRects），窗口其余地方穿过去，点击直接落到后面的窗口
+            // 换了系统缩放（改了缩放、拖到缩放不同的另一块屏幕）：窗口按新缩放重设物理像素大小，脚底不动。网页控件自己跟着缩放走，不用再逼它对齐
+            Host.DpiScaleChanged += (_, __) => ui.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                Store.Log($"系统缩放变了：现在 {Math.Round(Host.DpiScale * 100)}%");
+                lastMotionPosition = null;   // 换屏时系统可能已重新摆放窗口
+                ApplyScale(shownScale > 0 ? shownScale : Scale, Anchor.Feet);
+            }));
+            Host.Load += async (_, __) => await InitWeb();
+            Host.Show();
 
             if (Store.IsMain)   // 托盘图标只有第一只有；系统通知也只从它这里弹（Pet.Notices.cs 靠 tray）
             {
@@ -111,7 +103,7 @@ namespace Claudia
             SystemEvents.SessionSwitch += (_, e) =>
             {
                 if (e.Reason == SessionSwitchReason.SessionLock || e.Reason == SessionSwitchReason.SessionUnlock)
-                    Window.Dispatcher.BeginInvoke(new Action(() =>
+                    ui.BeginInvoke(new Action(() =>
                     {
                         var locked = e.Reason == SessionSwitchReason.SessionLock;
                         sessionLocked = locked;
@@ -143,13 +135,13 @@ namespace Claudia
                 web.ZoomFactor = Scale * zoomFix;
                 // 网页进程 / 浏览器进程崩溃（显卡驱动、系统睡眠醒来、内存不够时偶尔会）：不处理的话她就一直停住，
                 // 之后每次调网页都报「控件已失效」
-                core.ProcessFailed += (_, a) => Window.Dispatcher.BeginInvoke(new Action(() => _ = RecoverWeb(a.ProcessFailedKind)));
+                core.ProcessFailed += (_, a) => ui.BeginInvoke(new Action(() => _ = RecoverWeb(a.ProcessFailedKind)));
                 core.NavigationCompleted += async (_, a) =>
                 {
                     ready = false;
                     if (!a.IsSuccess) { Store.Log("桌宠页面加载失败: " + a.WebErrorStatus); return; }
                     LoadCharacters();
-                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setQuotaStyle({Q(QuotaStyle)}); setBehavior({Store.Json.Serialize(BehaviorState())})");
+                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setQuotaStyle({Q(QuotaStyle)}); setBehavior({Store.Json.Serialize(BehaviorState())}); setPointerBridge(true)");   // 鼠标由网页交给外壳（见 HandlePointer）
                     // 刚更新完（上次打开的是别的版本）：让她说一声
                     var last = Store.Settings.TryGetValue("lastVersion", out var lv) ? lv as string : null;
                     // 「新功能」页看到哪一版了（设置里的小红点用）：没记过时，老用户按上次的版本算（有没看过的就亮），新安装按当前版本（不亮）。要在下面改掉 lastVersion 之前记
@@ -160,7 +152,6 @@ namespace Claudia
                     UpdatePageHidden();
                     if (RenderRecovery.Ready()) tray?.ShowBalloonTip(6000, Store.AppName, "上次画面出了问题，现已重新打开。", Forms.ToolTipIcon.Info);
                     ApplySizes(anchor: Anchor.Corner);   // 解锁过文字大小的：按画布重设窗口，左上角不动（锁着的尺寸不变）
-                    After(1000, PassThroughBrowserWindows); After(5000, PassThroughBrowserWindows);   // 背后的浏览器窗口不接鼠标（见 PassThroughBrowserWindows）
                     stamps.Clear();
                     Poll();
                 };
@@ -175,6 +166,7 @@ namespace Claudia
                             if (core == web?.CoreWebView2) { hitRects = regions; UpdateHitRects(); }
                             return;
                         }
+                        if (core == web?.CoreWebView2 && HandlePointer(m)) return;   // 按下 / 拖动 / 单击 / 右键（见 Pet.Mouse.cs）
                         if (m.TryGetValue("motion", out var mm) && mm is Dictionary<string, object> movement) { AcceptMotion(movement); return; }
                         if (m.ContainsKey("walk")) { HandleWalk(m["walk"] as Dictionary<string, object>); return; }
                         // 网页脚本出错：记进日志（每次启动最多 20 条）
@@ -213,10 +205,8 @@ namespace Claudia
                     web.CoreWebView2.Reload();
                     return;
                 }
-                var old = web;
-                web = new WebView2CompositionControl { DefaultBackgroundColor = System.Drawing.Color.Transparent, IsHitTestVisible = false };
-                grid.Children.Remove(old);
-                grid.Children.Insert(0, web);
+                var old = Host.ReplaceWeb();   // 浏览器进程挂了控件就废了：窗口里换一个新的网页控件
+                web = Host.Web;
                 try { old.Dispose(); } catch { }
                 env = await CoreWebView2Environment.CreateAsync(null, Store.WebViewDir);
                 await InitWeb();

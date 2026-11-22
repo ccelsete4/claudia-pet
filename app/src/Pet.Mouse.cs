@@ -1,20 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Media;
 using System.Windows.Threading;
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
-using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 
 namespace Claudia
@@ -22,81 +9,79 @@ namespace Claudia
     sealed partial class Pet
     {
         // ---------------- 能点到的区域 ----------------
-        Canvas hit;
-        static readonly Brush HitBrush = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
+        // 网页报来（hitRects 消息，画布坐标）：桌宠本体、气泡、名牌、额度。换成窗口里的物理像素交给 DirectHost：
+        // 鼠标在这几块上窗口才接，别处整个穿过去，点击直接落到后面的窗口（窗口比桌宠大，是给动作、气泡留的空间）
         object[] hitRects, appliedHitRects;
-        double appliedHitZoom;
+        int appliedHitWidth;
         void UpdateHitRects()
         {
-            if (hit == null || !ready || hitRects == null || hit.IsMouseCaptured) return;
-            var zoom = Window.Width / pageW;   // 网页像素 → 窗口坐标（画布可能因为文字大小比 260 宽）
-            if (hitRects == appliedHitRects && zoom == appliedHitZoom) return;
-            hit.Children.Clear();
-            foreach (var item in hitRects)
-            {
-                if (!(item is object[] r) || r.Length != 4) continue;
-                var box = new System.Windows.Shapes.Rectangle { Fill = HitBrush, Width = Convert.ToDouble(r[2]) * zoom, Height = Convert.ToDouble(r[3]) * zoom };
-                Canvas.SetLeft(box, Convert.ToDouble(r[0]) * zoom);
-                Canvas.SetTop(box, Convert.ToDouble(r[1]) * zoom);
-                hit.Children.Add(box);
-            }
-            appliedHitRects = hitRects; appliedHitZoom = zoom;
+            if (Host == null || !ready || hitRects == null) return;
+            var width = Host.Width;   // 物理像素
+            if (hitRects == appliedHitRects && width == appliedHitWidth) return;
+            var zoom = width / pageW;   // 画布像素 → 窗口里的物理像素（画布可能因为文字大小比 260 宽）
+            Host.SetHitRects(HitRectsToWindow(hitRects, zoom));
+            appliedHitRects = hitRects; appliedHitWidth = width;
         }
+        static IEnumerable<System.Drawing.Rectangle> HitRectsToWindow(object[] rects, double zoom) =>
+            rects.OfType<object[]>().Where(r => r.Length == 4).Select(r => new System.Drawing.Rectangle(
+                (int)Math.Floor(Convert.ToDouble(r[0]) * zoom), (int)Math.Floor(Convert.ToDouble(r[1]) * zoom),
+                (int)Math.Ceiling(Convert.ToDouble(r[2]) * zoom), (int)Math.Ceiling(Convert.ToDouble(r[3]) * zoom)));
 
         // ---------------- 鼠标：单击摸头、拖动换位置、右键菜单 ----------------
-        void WireMouse(UIElement hit)
+        // 网页收到鼠标后交来（pointer 消息，见 index.html 的 setPointerBridge）。以前是 WPF 窗口里一层透明画布自己接鼠标。
+        // 拖动开始以后网页就不再报了：轨迹由每帧从系统鼠标历史取，松手按物理按键状态判断（见 Pet.Physics.cs 的 PumpOnFrame）
+        double downX, downY;   // 左键按下时鼠标在屏幕上的位置（物理像素）：拖动从哪儿拎起来的
+        bool pressed;          // 按下了、还没开始拖、也还没单击
+        bool HandlePointer(Dictionary<string, object> m)
         {
-            Point down = default; bool pressed = false;
-            hit.MouseLeftButtonDown += (_, e) =>
+            if (!(m.TryGetValue("pointer", out var pv) && pv is string pointer)) return false;
+            switch (pointer)
             {
-                StopMotion(); releasedEarly = false;
-                var cursor = Forms.Cursor.Position;
-                down = new Point(cursor.X, cursor.Y); pressed = true; hit.CaptureMouse(); e.Handled = true;
-            };
-            hit.MouseMove += (_, e) =>
+                case "down":
+                    StopMotion(); releasedEarly = false;   // 飞着的时候一把抓住
+                    var cursor = Forms.Cursor.Position;
+                    downX = cursor.X; downY = cursor.Y; pressed = true;
+                    break;
+                case "drag":
+                    if (!pressed || dragging) break;
+                    pressed = false;
+                    // 消息晚到时手可能早就松开了：按键确实还按着才开始拖动
+                    if (PrimaryButtonDown()) BeginDrag(downX, downY);
+                    break;
+                case "click":
+                    pressed = false;
+                    double x = m.TryGetValue("x", out var xv) ? Convert.ToDouble(xv) : 0, y = m.TryGetValue("y", out var yv) ? Convert.ToDouble(yv) : 0;
+                    Js($"handleClick('pat', {Num(x)}, {Num(y)})");
+                    break;
+                case "menu":
+                    pressed = false;
+                    ui.BeginInvoke(new Action(ShowMenu));   // 等网页控件的回调返回再弹
+                    break;
+            }
+            return true;
+        }
+
+        void ShowMenu()
+        {
+            openMenu?.Close();
+            var menu = new Forms.ContextMenuStrip();
+            FillMenu(menu);
+            // 菜单靠「程序失去焦点」来关，可桌宠窗口从不拿焦点（WS_EX_NOACTIVATE），点别的程序它收不到，菜单一直挂着。
+            // 开着时自己看：鼠标在菜单（含展开的子菜单）外面按下就关
+            var watch = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+            watch.Tick += (_, ___) =>
             {
-                // 已经按系统按键状态松手了：排在松开消息前面的旧移动消息不能再开始一次拖动
-                if (!pressed || releasedEarly || e.LeftButton != MouseButtonState.Pressed) return;
-                if (dragging) return;   // 拖动中的轨迹由每帧的 PumpOnFrame 从系统鼠标历史取
-                var cursor = Forms.Cursor.Position;
-                var p = new Point(cursor.X, cursor.Y);
-                if (Math.Abs(p.X - down.X) + Math.Abs(p.Y - down.Y) <= 4) return;
-                // 积压的旧移动消息晚到时，手可能早就松开了：按键确实还按着才开始拖动
-                if (!PrimaryButtonDown()) return;
-                BeginDrag(down.X, down.Y);
+                if (Forms.Control.MouseButtons != Forms.MouseButtons.None && !MenuCovers(menu, Forms.Cursor.Position)) menu.Close();
             };
-            hit.MouseLeftButtonUp += (_, e) =>
+            menu.Opened += (_, ___) => watch.Start();
+            menu.Closed += (_, ___) =>
             {
-                var wasDragging = dragging || releasedEarly; releasedEarly = false; EndDrag(e.Timestamp);
-                var click = pressed && !wasDragging;
-                pressed = false; hit.ReleaseMouseCapture();
-                if (!click) return;
-                var p = e.GetPosition(hit); var z = Math.Max(Window.Width / pageW, 0.01);
-                Js($"handleClick('pat', {Num(Math.Round(p.X / z, 1))}, {Num(Math.Round(p.Y / z, 1))})");
+                watch.Stop();
+                if (openMenu == menu) openMenu = null;
+                ui.BeginInvoke(new Action(menu.Dispose));
             };
-            hit.LostMouseCapture += (_, __) => { pressed = false; if (dragging) StopMotion(); UpdateHitRects(); };
-            hit.MouseRightButtonUp += (_, __) =>
-            {
-                openMenu?.Close();
-                var menu = new Forms.ContextMenuStrip();
-                FillMenu(menu);
-                // 菜单靠「程序失去焦点」来关，可桌宠窗口从不拿焦点（WS_EX_NOACTIVATE），点别的程序它收不到，菜单一直挂着。
-                // 开着时自己看：鼠标在菜单（含展开的子菜单）外面按下就关
-                var watch = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
-                watch.Tick += (_, ___) =>
-                {
-                    if (Forms.Control.MouseButtons != Forms.MouseButtons.None && !MenuCovers(menu, Forms.Cursor.Position)) menu.Close();
-                };
-                menu.Opened += (_, ___) => watch.Start();
-                menu.Closed += (_, ___) =>
-                {
-                    watch.Stop();
-                    if (openMenu == menu) openMenu = null;
-                    Window.Dispatcher.BeginInvoke(new Action(menu.Dispose));
-                };
-                openMenu = menu;
-                menu.Show(Forms.Cursor.Position);
-            };
+            openMenu = menu;
+            menu.Show(Forms.Cursor.Position);
         }
 
         /// <summary>开着的右键菜单：藏起来（全屏、快捷键）时一起关掉，不然桌宠藏了、菜单还单独挂在屏幕上</summary>

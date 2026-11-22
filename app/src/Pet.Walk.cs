@@ -32,12 +32,20 @@ namespace Claudia
             if (room < WalkMinRoom) { Js("walkEnded('blocked')"); return; }
             walking = true; walkDir = (int)dir; walkSpeed = speed; walkX = r.Left;
             walkLast = walkClock.ElapsedMilliseconds; walkUntil = walkLast + (long)ms;
-            CompositionTarget.Rendering -= WalkFrame; CompositionTarget.Rendering += WalkFrame;
+            if (walkTimer == null)
+            {
+                walkTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
+                walkTimer.Tick += WalkFrame;
+            }
+            walkTimer.Start();
         }
+        // 每帧挪一次。以前挂在 WPF 的 CompositionTarget.Rendering 上；换成 DirectHost 后屏幕上没有 WPF 窗口在画，它不一定还来，
+        // 改用 16 毫秒（约 60 次 / 秒）的计时器（同 Pet.Physics.cs 的 dragPump）。走多远按实际经过的时间算，计时器早晚一点不影响速度
+        System.Windows.Threading.DispatcherTimer walkTimer;
 
         void WalkFrame(object sender, EventArgs e)
         {
-            if (!walking) { CompositionTarget.Rendering -= WalkFrame; return; }
+            if (!walking) { walkTimer?.Stop(); return; }
             if (dragging || flying) { StopWalk(null); return; }   // 拖动接管
             if (concealed || sessionLocked || !AreaRect(out var c)) { StopWalk("done"); return; }
             var now = walkClock.ElapsedMilliseconds;
@@ -61,7 +69,7 @@ namespace Claudia
         {
             if (!walking) return;
             walking = false;
-            CompositionTarget.Rendering -= WalkFrame;
+            walkTimer?.Stop();
             if (hwnd != IntPtr.Zero) SavePosition();
             if (reason != null) Js($"walkEnded('{reason}')");
         }
