@@ -8,8 +8,13 @@
   claudia-pet --connect [plugin|mcp|gnome|all] / --disconnect [...]   接入 / 撤销（gnome = 跟着 Claude 窗口的 GNOME 扩展）
   claudia-pet --pet 2 [--mode desktop|claude]                   多开的那几只，由第一只带起来
 """
+import faulthandler
 import os
 import sys
+
+# 进程被 C 层面的错误弄死时（段错误、glibc 报 corrupted double-linked list 后中止）把当时每个线程正在跑的
+# Python 调用栈打到 stderr（~/.claudia/stderr.log）。2026-11-22 拖动后崩过好几次，没留下别的线索
+faulthandler.enable()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

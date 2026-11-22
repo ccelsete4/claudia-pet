@@ -75,6 +75,7 @@ class Pet:
         self.off_right, self.off_bottom = 0, DEFAULT_OFF_BOTTOM
         self.vis_applied = False
         self.claude_seen_at = None
+        self.claude_window_seen = False   # 这次运行里 GNOME 扩展找到过 Claude 窗口没有（找到过又没了 = 收进托盘）
         self.follow_since = time.monotonic()
         self.top_at = 0.0
         # 拖动 / 飞行
@@ -399,11 +400,19 @@ class Pet:
         return bool(st and st.get("found"))
 
     def want_desktop(self):
-        """该待在哪：选了桌面就桌面；没有 GNOME 扩展只能待在桌面；扩展没找到 Claude 的窗口（没开，或者认不出来），
-        也先待在桌面上（不改存着的设置），找到了再回去。最小化不算没找到：最小化时她跟着藏起来"""
+        """该待在哪：选了桌面就桌面；没有 GNOME 扩展只能待在桌面。最小化不算没找到：最小化时她跟着藏起来。
+        扩展找不到 Claude 窗口时分两种（不改存着的设置）：
+        - 这次运行里找到过、后来没了：Claude 点 × 收进了托盘。照 Windows 版（Pet.Follow.cs 的 WantDesktop）：
+          独立运行才去桌面；跟着 Claude 时跟着藏起来，Claude 窗口出来再露面（2026-11-22 用户说点 × 后桌面上多出一只）。
+        - 从启动起一次都没找到：可能是扩展认不出这个 Claude，先待在桌面上，免得整只看不见。"""
         if not (self.claude_watch and self.claude_watch.available):
             return True
-        return self.on_desktop() or not self.claude_found()
+        if self.on_desktop():
+            return True
+        if self.claude_found():
+            self.claude_window_seen = True
+            return False
+        return store.standalone() or not self.claude_window_seen
 
     def check_area(self):
         desk = self.want_desktop()
@@ -811,6 +820,7 @@ class Pet:
         # 松开的消息可能丢了（鼠标甩出窗口、窗口在鼠标底下挪动时）：每一帧都直接看左键还按没按着，
         # 不然拖动一直不结束，看着像「断触」（2026-11-17 用户说拖拽不跟手还会断触）
         if not self.button_held():
+            self.drag_timer = None   # 返回 False 后 GLib 自己删掉这个计时器；不清空的话 stop_motion 会拿旧编号再删一次
             self.end_drag()
             self.pressed = False
             self.update_hit_rects()

@@ -56,17 +56,18 @@ SHAPE_BOUNDING = 0
 
 
 def set_visible(xid, visible):
-    """窗口画不画出来（SHAPE 扩展的外形区域）：False = 外形是空的，窗口在屏幕上也看不见；True = 恢复成整个窗口。
-    窗口从屏幕外挪进来的头一两帧，合成器可能还拿着没画好的缓冲区，会闪一个空方块：先把外形设成空，等画好了再恢复"""
+    """窗口画不画出来（SHAPE 扩展的外形区域）：False = 外形只剩左上角 1×1（那里在人物外面，本来就透明），
+    窗口在屏幕上等于看不见；True = 恢复成整个窗口。
+    窗口从屏幕外挪进来的头一两帧，合成器可能还拿着没画好的缓冲区，会闪一个空方块：先把外形缩掉，等画好了再恢复。
+    不用「零个矩形」的空外形：GNOME 50（Mutter，Wayland 会话、窗口走 XWayland）实测不认空外形，X 服务器那边外形已经
+    是空的，屏幕上却还留着窗口最后一帧——最小化 Claude 后她停在原地不动（2026-11-22）。
+    恢复也不用「取消外形」（XShapeCombineMask 给 None）：Mutter 同样不认，外形会一直停在 1×1、她就再也不出来了。
+    改成设一个远大于窗口的矩形：服务器按窗口大小截掉多出来的部分，等于整个窗口，以后改大小也不会被裁"""
     if not _init() or not xid:
         return False
-    if visible:
-        _ext.XShapeCombineMask.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                           ctypes.c_ulong, ctypes.c_int]
-        _ext.XShapeCombineMask(_dpy, xid, SHAPE_BOUNDING, 0, 0, 0, SHAPE_SET)   # 掩码给 None：恢复默认外形
-    else:
-        arr = (_Rect * 1)()
-        _ext.XShapeCombineRectangles(_dpy, xid, SHAPE_BOUNDING, 0, 0, arr, 0, SHAPE_SET, UNSORTED)
+    rect = _Rect(0, 0, 32767, 32767) if visible else _Rect(0, 0, 1, 1)
+    arr = (_Rect * 1)(rect)
+    _ext.XShapeCombineRectangles(_dpy, xid, SHAPE_BOUNDING, 0, 0, arr, 1, SHAPE_SET, UNSORTED)
     # 这是另一条 X 连接：等服务器处理完再回去，不然 GTK 那边接着发的「显示窗口」可能先到
     _x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
     _x11.XSync(_dpy, 0)
