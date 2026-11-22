@@ -24,17 +24,55 @@ namespace Claudia
         // 菜单项横向尺寸（96 DPI 下的像素，按屏幕缩放放大）：TextOrigin 是 WinForms 按 Padding.Left = 6 画字的起点，
         // 最长那项文字的最后一笔后面统一留 RightBlank（三级一样）；有子菜单的箭头 WinForms 画在离右边约 12 处，落在这段留白里
         const int TextOrigin = 12, RightBlank = 32, ArrowGap = 8;
-        static Font font;
+        static Font baseFont, font;
+        static readonly System.Collections.Generic.Dictionary<int, Font> fonts = new System.Collections.Generic.Dictionary<int, Font>();
+        static Forms.Padding itemPadding = new Forms.Padding(6, 4, 6, 4);
+        static float menuScale = 1;   // 这次菜单弹出那块屏的缩放（1 = 100%）：宽度、箭头位置按它算
         static readonly Renderer renderer = new Renderer();
 
+        /// <summary>
+        /// 套上柔和样式，按菜单弹出那块屏（鼠标所在的屏）的缩放定大小。
+        /// WinForms（.NET Framework，没在 App.config 里开按显示器缩放）里，字号换成像素、菜单的 DeviceDpi 都按「系统缩放」
+        /// （登录时主屏的缩放）算，菜单弹到缩放不同的另一块屏上就整个大一圈 / 小一圈：2026-11-22 用户主屏是笔记本 2K 150%，
+        /// 在外接 1080p 100% 上菜单大了一半。所以字号和内边距乘「这块屏的缩放 ÷ 系统缩放」，宽度、箭头按这块屏的缩放算；
+        /// 在和系统缩放一样的屏上比例是 1，和原来完全一样
+        /// </summary>
         public static void Apply(Forms.ToolStripDropDown menu)
         {
-            if (font == null)
+            if (baseFont == null)
             {
-                try { font = new Font("Microsoft YaHei UI", 9.75f); } catch { font = Forms.SystemInformation.MenuFont; }
+                try { baseFont = new Font("Microsoft YaHei UI", 9.75f); } catch { baseFont = Forms.SystemInformation.MenuFont; }
             }
+            float monitor = MonitorDpi(Forms.Cursor.Position), system = SystemDpi();
+            menuScale = monitor / 96f;
+            float ratio = monitor / system;
+            var key = (int)Math.Round(ratio * 100);
+            if (!fonts.TryGetValue(key, out font))
+                fonts[key] = font = key == 100 ? baseFont : new Font(baseFont.FontFamily, baseFont.SizeInPoints * ratio, baseFont.Style);
+            int px(int v) => Math.Max(1, (int)Math.Round(v * ratio));
+            itemPadding = new Forms.Padding(px(6), px(4), px(6), px(4));
             Style(menu);
         }
+
+        /// <summary>某一点所在显示器的缩放（DPI，96 = 100%）；查不到就当和系统缩放一样</summary>
+        static float MonitorDpi(Point p)
+        {
+            try
+            {
+                var monitor = MonitorFromPoint(p, 2 /* MONITOR_DEFAULTTONEAREST */);
+                if (monitor != IntPtr.Zero && GetDpiForMonitor(monitor, 0 /* MDT_EFFECTIVE_DPI */, out var x, out _) == 0 && x > 0) return x;
+            }
+            catch { }
+            return SystemDpi();
+        }
+        /// <summary>系统缩放（GDI 把字号换成像素按的就是它）</summary>
+        static float SystemDpi()
+        {
+            try { using (var g = Graphics.FromHwnd(IntPtr.Zero)) return g.DpiY > 0 ? g.DpiY : 96; }
+            catch { return 96; }
+        }
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point pt, uint flags);
+        [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
 
         static void Style(Forms.ToolStripDropDown dd)
         {
@@ -55,7 +93,7 @@ namespace Claudia
                 it.Font = font;
                 it.ForeColor = Text;
                 if (it is Forms.ToolStripSeparator) continue;
-                it.Padding = new Forms.Padding(6, 4, 6, 4);
+                it.Padding = itemPadding;
                 if (it is Forms.ToolStripMenuItem mi && mi.HasDropDownItems) Style(mi.DropDown);
             }
         }
@@ -68,7 +106,7 @@ namespace Claudia
         {
             // 菜单项宽度自己定：WinForms 给每项右边预留的一截（箭头列 + 内边距）太长，最长那项文字后面还空 54–68 像素。
             // 改成 文字左边距 + 最长文字 + 统一的右边留白，三级一样宽的留白；有子菜单的箭头画在留白里（见 OnRenderArrow）
-            float s = dd.DeviceDpi / 96f;
+            float s = menuScale;   // 不用 dd.DeviceDpi：那是系统缩放，不是菜单所在那块屏的（见 Apply）
             int text = 0, hItem = 0;
             foreach (Forms.ToolStripItem it in dd.Items)
             {
@@ -203,7 +241,7 @@ namespace Claudia
                 {
                     // 菜单项定宽后 WinForms 把箭头贴到离右边两三像素，挪回离边 ArrowGap（和左边文字的 13 差不多对称）
                     var r = e.ArrowRectangle;
-                    float s = (e.Item.Owner?.DeviceDpi ?? 96) / 96f;
+                    float s = menuScale;
                     r.X = e.Item.Width - (int)Math.Round(ArrowGap * s) - r.Width;
                     e.ArrowRectangle = r;
                 }
