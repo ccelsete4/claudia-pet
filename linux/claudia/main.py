@@ -51,10 +51,42 @@ SESSION_VARS = ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "
                 "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP")
 
 
+def env_from_ancestors():
+    """沿父进程一级级往上找，第一个有 DISPLAY / WAYLAND_DISPLAY 的进程，把它的会话变量补进自己的环境（只补没有的）。
+    有的桌面（2026-11-23 那台 Debian 13 + Openbox，Claude 桌面端外面套着 cage）给 MCP 的环境只剩几个变量，
+    claude-desktop 自己的环境里也没有 DISPLAY，再往上的启动脚本才有；systemd 用户会话里也没有，X 也不是 :0。
+    读的是自己这个用户的进程的 /proc/<pid>/environ。返回找到的那个进程号，没找到返回 0"""
+    pid = os.getppid()
+    for _ in range(16):
+        if pid <= 1:
+            return 0
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(kv.split("=", 1) for kv in f.read().decode("utf-8", "replace").split("\0") if "=" in kv)
+        except OSError:
+            env = {}
+        if env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"):
+            for k in SESSION_VARS:
+                if env.get(k) and not os.environ.get(k):
+                    os.environ[k] = env[k]
+            return pid
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])   # 「pid (名字) 状态 父进程号 …」
+        except (OSError, ValueError, IndexError):
+            return 0
+    return 0
+
+
 def fill_session_env(override=False):
-    """Claude 桌面端随登录自启时，交给 MCP 的环境里可能还没有 DISPLAY、XAUTHORITY：从 systemd 用户会话里补上"""
+    """Claude 桌面端随登录自启时，交给 MCP 的环境里可能还没有 DISPLAY、XAUTHORITY：先从父进程链里找（env_from_ancestors），
+    再从 systemd 用户会话里补"""
     import glob
     import subprocess
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        found = env_from_ancestors()
+        if found:
+            store.log(f"图形界面的环境从父进程 {found} 那里补上：DISPLAY={os.environ.get('DISPLAY')!r}")
     run = f"/run/user/{os.getuid()}"
     if not os.environ.get("XDG_RUNTIME_DIR") and os.path.isdir(run):
         os.environ["XDG_RUNTIME_DIR"] = run
@@ -74,6 +106,61 @@ def fill_session_env(override=False):
         auth = sorted(glob.glob(run + "/.mutter-Xwaylandauth.*"), key=os.path.getmtime)
         if auth:
             os.environ["XAUTHORITY"] = auth[-1]
+
+
+def ensure_compositor():
+    """X11 下没有合成器（_NET_WM_CM_S0 没人占）时，透明窗口透明的地方是黑的。装了 picom 就用最朴素的参数把它拉起来：
+    不读默认配置（那份会给所有窗口加阴影、淡入淡出）、纯软件合成（虚拟机没有 3D 加速也稳）。
+    2026-11-23 那台 Debian 13 + Openbox（外面套着 cage，会话脚本是系统的、没有给用户留自启动入口）就是这样：
+    跟着桌宠一起起来，重启电脑后也不用另外设自启。已经有合成器（GNOME 等）或 Wayland 时什么也不做"""
+    import ctypes
+    import ctypes.util
+    import shutil
+    import subprocess
+    import time
+    if os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("DISPLAY"):
+        return
+
+    def cm_owner():
+        try:
+            x = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+            x.XOpenDisplay.restype = ctypes.c_void_p
+            x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x.XInternAtom.restype = ctypes.c_ulong
+            x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            x.XGetSelectionOwner.restype = ctypes.c_ulong
+            x.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            d = x.XOpenDisplay(None)
+            if not d:
+                return None
+            owner = x.XGetSelectionOwner(d, x.XInternAtom(d, b"_NET_WM_CM_S0", 0))
+            x.XCloseDisplay(d)
+            return owner
+        except OSError:
+            return None
+
+    if cm_owner() != 0:   # 有合成器，或者查不了（查不了就别乱动）
+        return
+    exe = shutil.which("picom")
+    if not exe:
+        store.log("没有合成器：透明的地方会是黑的（装 picom 后桌宠会自己把它拉起来：sudo apt install picom）")
+        return
+    try:
+        # --no-use-damage：每次整屏重画。只画「变了的区域」在 Xvnc（TigerVNC）上会漏画，出现黑方块、偶尔整屏发黑
+        subprocess.Popen([exe, "--config", "/dev/null", "--backend", "xrender", "--no-use-damage", "--no-vsync",
+                          "--log-level", "warn", "--log-file", str(store.DATA / "picom.log"), "-b"],
+                         stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    except OSError as e:
+        store.log("启动 picom 失败: " + str(e))
+        return
+    for _ in range(30):   # 最多等 3 秒，等它占上合成器的位置再开窗口
+        time.sleep(0.1)
+        if cm_owner():
+            store.log("没有合成器，已启动 picom（不加阴影、不加淡入淡出、整屏重画）")
+            return
+    store.log("启动了 picom，但 3 秒内没接管合成（透明的地方可能还是黑的）")
 
 
 def x_display_ok():
@@ -111,6 +198,10 @@ def wait_for_display(seconds=30):
 
 
 def main(args):
+    if "--ensure" in args or "--mcp" in args:
+        # 这两个会把桌宠拉起来（子进程继承这里的环境）：先补好图形界面的变量。等桌宠自己再补时，
+        # MCP 进程往往已经退了、父进程链断了，就找不到了
+        fill_session_env()
     if "--ensure" in args:
         store.log("--ensure：" + claude.ensure())
         return 0
@@ -173,6 +264,7 @@ def main(args):
         store.log(f"打不开图形界面：DISPLAY={os.environ.get('DISPLAY')!r}，XAUTHORITY={os.environ.get('XAUTHORITY')!r}")
         print(store.APP_NAME + "：打不开图形界面", file=sys.stderr)
         return 1
+    ensure_compositor()   # 没有合成器时透明处是黑的：开窗口前先拉起 picom（装了的话）
     if not os.environ.get("CLAUDIA_DEBUG"):
         # WebKit、EGL、托盘库的警告（虚拟机里没有 3D 加速时一大串）不往终端刷：写进 ~/.claudia/stderr.log
         try:
@@ -223,12 +315,17 @@ def main(args):
     pet = Pet()
     pet.start()
     srv = system.serve(claude.socket_path(store.pet_id), pet.on_command)
+    # 注册退出信号的函数各版本叫法不一样：新的 GLib 在 GLibUnix 里叫 signal_add；Debian 13（GLib 2.84、PyGObject 3.50）
+    # 有 GLibUnix 却只有 signal_add_full，老的 GLib.unix_signal_add 还在（2026-11-23：以前只接 ValueError / ImportError，
+    # 这里抛 AttributeError，一启动就崩）。按顺序找第一个有的
+    signal_add = None
     try:
         gi.require_version("GLibUnix", "2.0")
         from gi.repository import GLibUnix
-        signal_add = GLibUnix.signal_add
+        signal_add = getattr(GLibUnix, "signal_add", None)
     except (ValueError, ImportError):
-        signal_add = GLib.unix_signal_add
+        GLibUnix = None
+    signal_add = signal_add or getattr(GLib, "unix_signal_add", None) or getattr(GLibUnix, "signal_add_full", None)
     for sig in (2, 15):   # SIGINT、SIGTERM：好好退出
         signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *_: (pet.quit(), False)[1])
     if main_pet:
