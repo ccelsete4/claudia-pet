@@ -760,7 +760,10 @@ function leaveVia(next, target = null) {
   const a = anim(pose)
   if (!a?.exit || exiting || exitedFrom === pose || (target && a.exit.except?.includes(target))) return false
   if (document.documentElement.classList.contains('moving') || tumble || multi || farewellLine !== null) return false
-  const from = a.exit.from, to = a.exit.to ?? SHEET.frames - 1, p = pose
+  // exit.continue：不跳到 exit.from，从正在播的那一帧一直正着播到收尾结束（循环段播完这一轮、再接视频里原本的后半段），不跳帧、不倒放。
+  // 用在循环段两头和收尾对不上的动作上（2026-11-23 有事问你：Wan 出片后半段整体偏了，跳过去会闪一下）。睡觉不用：点醒要马上醒
+  const s = sheet, to = a.exit.to ?? SHEET.frames - 1, p = pose
+  const from = a.exit.continue && s?.img && s.url && a.urls.includes(s.url) && s.frame < a.exit.from ? s.frame : a.exit.from
   exiting = { pose: p, next }
   clearTimeout(revertTimer)
   playSheet({ ...a, from, to, hold: null, cycle: null, loop: false, keepUrl: true }, framesFor(p)[0])

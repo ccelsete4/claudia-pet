@@ -335,6 +335,7 @@
     "writing": { "sheets": ["写代码"], "loop": true },
     "reading": { "sheets": ["看书-翻页"], "loop": true },
     "searching": { "sheets": ["查资料-扫读翻页"], "to": 67, "cycle": [42, 67], "exit": { "from": 68, "to": 96 } },
+    "asking": { "sheets": ["有事问你-举手"], "to": 47, "cycle": [33, 47], "exit": { "from": 48, "to": 95, "continue": true } },
     "running": { "sheets": ["工作状态-忙碌点按"], "loop": true },
     "compact": { "sheets": ["工作状态-清点归档"], "loop": true },
     "sleeping": { "sheets": ["原地小憩沉眠"], "to": 76, "hold": [28, 76], "exit": { "from": 77 } },

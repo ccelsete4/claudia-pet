@@ -66,6 +66,18 @@ function manifest() {
       show('thinking', true); frames.push(sheet.frame, sheet.to)
       return frames
     }), [0, 67, 42, 68, 96], 'searching must play the opening, repeat the scan and leave through the close')
+    await page.evaluate(() => setPose('asking', true))
+    await page.waitForFunction(() => pose === 'asking' && sheet?.img && sheet.to === 47)
+    assert.deepEqual(await page.evaluate(() => {
+      const frames = [sheet.frame]
+      sheet.frame = 46
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheet.frame = 40
+      show('thinking', true); frames.push(sheet.frame, sheet.to, sheet.cycle)
+      sheetStep(sheet); frames.push(sheet.frame)
+      return frames
+    }), [0, 47, 33, 40, 95, null, 41], 'asking must raise the hand, loop the wave forward, and on leaving play on from the current frame to the end')
     await page.evaluate(() => { setPageHidden(false); setPose('idle', true) })
     await page.evaluate(() => { pose = null; setPose('idle', true) }); await waitSheet()
     let s = await state()
