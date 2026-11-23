@@ -42,14 +42,14 @@ html.moving #cards .scard { animation: none !important; }
 /* 立绘按高度占满人物框；比框宽的（张开翅膀、带小帮手、抱大碗……）往左右多伸出去，最多到整个舞台宽，
    而不是整体缩小——这样所有姿态里人物一样高 */
 #body img { position: absolute; top: 0; bottom: 0; left: -27.5%; width: 155%; height: 100%; object-fit: contain; object-position: 50% 100%;
-  opacity: 0; transition: opacity .35s ease; }
+  opacity: 0; transition: opacity .18s ease; }
 #body img.on { opacity: 1; }
 /* 还没有图片的 <img>：WebKitGTK（Linux 版）会给它画一圈灰色占位框，刚打开时看得到（2026-11-17）；WebView2 不画，加上也没影响 */
 #body img:not([src]), #body img[src=""] { visibility: hidden; }
 #body img#blink { transition: none; }
 html.flipping #body img, html.flipping #body canvas.sheet { transition: none; }   /* 补帧翻页：硬切，不交叉淡入（淡入时前后两帧叠在一起像重影）；从动画换过来时动画画布也直接消失 */
 /* 动画动作（claude-pet 动作包的精灵图，逐帧画到 canvas 上）：两块画布轮流交叉淡入；播放时静态立绘淡出 */
-#body canvas.sheet { position: absolute; pointer-events: none; opacity: 0; transition: opacity .35s ease; }
+#body canvas.sheet { position: absolute; pointer-events: none; opacity: 0; transition: opacity .18s ease; }
 #body canvas.sheet.on { opacity: 1; }
 html.sheet-on #body img { opacity: 0 !important; }
 html.moving #body canvas.sheet { transition: none !important; }
@@ -1072,16 +1072,15 @@ function auraPulse(now = performance.now()) {
 }
 function updateAnimationTimers() {
   const playSheetFrames = !pageHidden && sheetCanAdvance(sheet)
-  if (sheet && !playSheetFrames) {
-    clearInterval(sheet.timer)
-    sheet.timer = null
-  }
+  if (sheet && !playSheetFrames) stopSheetClock(sheet)
+  if (pageHidden && fading) stopSheetClock(fading)
+  else if (fading?.canvas === sheetFront) startSheetClock(fading, advanceFadingSheet)
   const playAura = !pageHidden && !playSheetFrames && auraShown()
   if (!playAura) {
     clearInterval(auraTimer)
     auraTimer = null
   } else if (auraTimer === null) auraTimer = setInterval(() => auraPulse(), 1000 / SHEET.fps)
-  if (playSheetFrames && sheet.timer === null) sheet.timer = setInterval(sheetTick, 1000 / SHEET.fps)
+  if (playSheetFrames) startSheetClock(sheet, sheetTick)
 }
 DARK.addEventListener('change', updateAnimationTimers)
 updateAnimationTimers()

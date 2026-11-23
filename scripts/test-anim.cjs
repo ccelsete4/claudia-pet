@@ -55,6 +55,18 @@ function manifest() {
       bodyClass: $('body').className, fx: $('fx').innerHTML.length }))
     const waitSheet = () => page.waitForFunction(() => sheet?.img && document.documentElement.classList.contains('sheet-on'))
 
+    await page.waitForFunction(() => charId === 'claude' && !characterTarget && sheet?.img)
+    await page.evaluate(() => { setPageHidden(true); setPose('searching', true) })
+    await page.waitForFunction(() => pose === 'searching' && sheet?.img && sheet.to === 67)
+    assert.deepEqual(await page.evaluate(() => {
+      const frames = [sheet.frame]
+      sheet.frame = 66
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheetStep(sheet); frames.push(sheet.frame)
+      show('thinking', true); frames.push(sheet.frame, sheet.to)
+      return frames
+    }), [0, 67, 42, 68, 96], 'searching must play the opening, repeat the scan and leave through the close')
+    await page.evaluate(() => { setPageHidden(false); setPose('idle', true) })
     await page.evaluate(() => { pose = null; setPose('idle', true) }); await waitSheet()
     let s = await state()
     assert.equal(s.url, '待机呼吸休闲.webp'); assert.ok(s.on && s.front); assert.equal(s.bodyClass, '')
@@ -89,6 +101,31 @@ function manifest() {
       } finally { sheetPlace = place }
     })
     assert.equal(steadyLayoutReads, 0, 'steady sprite frames recomputed canvas geometry')
+
+    const delayedTick = await page.evaluate(() => {
+      const s = sheet
+      stopSheetClock(s)
+      s.frame = s.from
+      const realTimeout = window.setTimeout
+      let now = 0, tick
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => now })
+      window.setTimeout = callback => { tick = callback; return -1 }
+      try {
+        startSheetClock(s, sheetTick)
+        now = 220
+        tick()
+        const afterDelay = s.frame - s.from
+        now = 2000
+        tick()
+        return [afterDelay, s.frame - s.from - afterDelay]
+      } finally {
+        window.setTimeout = realTimeout
+        delete performance.now
+        stopSheetClock(s)
+        updateAnimationTimers()
+      }
+    })
+    assert.deepEqual(delayedTick, [2, 3], 'late ticks should recover cadence with bounded catch-up')
     const normalWidth = await page.evaluate(() => {
       $('body').style.height = '85%'
       return sheetFront.width
@@ -355,15 +392,31 @@ function manifest() {
     })
     assert.equal(outro.pose, 'idle'); assert.ok(outro.minFrame >= 92, `outro started at ${outro.minFrame}`); assert.equal(outro.gaps, 0)
     await waitSheet(); assert.equal((await state()).url, '待机呼吸休闲.webp')
-    // 换成另一张动画：新图读好、交叉淡入之前，旧动画接着往下播，不定格
+    // 新图读取期间旧动画继续播，新首帧接手后旧画布只淡出、不再换帧。
     const fadeAdvance = await page.evaluate(async () => {
-      show('hum', true)
-      const f = fading; if (!f) return 'no fading sheet'
-      const f0 = f.frame; await new Promise(r => setTimeout(r, 300))
-      return f.frame > f0 ? 'ok' : `stuck at ${f0}`
+      const load = loadSheet
+      let reveal
+      loadSheet = (url, done, fail) => load(url, image => { reveal = () => done(image) }, fail)
+      try {
+        show('hum', true)
+        const f = fading, from = f.frame
+        await new Promise(r => setTimeout(r, 160))
+        if (f.frame === from || sheetFront !== f.canvas) return 'old action stopped before handoff'
+        for (const start = performance.now(); !reveal && performance.now() - start < 3000;) await new Promise(r => setTimeout(r, 20))
+        if (!reveal) return 'new action failed to load'
+        reveal()
+        const last = f.frame
+        await new Promise(r => setTimeout(r, 115))
+        return f.frame === last && f.timer === null && sheetFront === sheet.canvas ? 'ok' : 'old action moved after handoff'
+      } finally { loadSheet = load }
     })
-    assert.equal(fadeAdvance, 'ok', 'outgoing animation froze during the switch')
+    assert.equal(fadeAdvance, 'ok')
     await page.waitForFunction(() => !fading, null, { timeout: 3000 })
+    await page.evaluate(() => { show('thinking', true); show('writing', true); show('hum', true) })
+    await waitSheet()
+    await page.waitForTimeout(260)
+    assert.ok(await page.evaluate(() => pose === 'hum' && sheet?.img && sheet.canvas === sheetFront && sheetFront.width > 1 && !fading),
+      'a superseded switch interfered with the final canvas')
     await page.evaluate(() => { clearTimeout(revertTimer); show('idle', true) }); await waitSheet()
     await page.evaluate(() => { messages.length = 0; startWalk('walk_crab', -1) }); await page.waitForFunction(() => messages.some(m => m.walk))
     await page.evaluate(() => { messages.length = 0; walkEnded('blocked') })   // 左边没地方：螃蟹步不往右，换成漂浮踏步往右

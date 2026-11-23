@@ -12,6 +12,7 @@
 | `oops.webp` | 哎呀 | 垂头叹气冒汗 |
 | `update.webp` | 抱礼物 | 拆礼物 |
 | `reading.webp`、`reading-2.webp` | 看书（两张翻页） | 看书-翻页（2026-11-18 本项目用 Seedance 2.0 生成） |
+| `searching.webp`、`searching-2.webp`、`searching-m1.webp` | 查资料（循环翻页） | 查资料-扫读翻页（2026-11-23 本项目制作） |
 | `proud.webp` | 得意（戴花冠、闭眼笑） | 得意-叉腰（2026-11-18 本项目用 Seedance 2.0 生成） |
 | `avatar.webp`、`portrait.webp`、`portrait-card.webp` | 头像、展示图（CrossPet 带来的，程序里早就没用到） | — |
 

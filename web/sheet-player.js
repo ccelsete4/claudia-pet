@@ -34,11 +34,33 @@ function sheetStep(s) {
   else if (s.hold) { s.holding = true; s.dir = -1; s.frame-- }
   else s.frame = s.from
 }
-function sheetTick() {
+function stopSheetClock(s) {
+  clearTimeout(s.timer)
+  s.timer = null
+}
+function startSheetClock(s, draw) {
+  if (!s || s.timer !== null || pageHidden || !sheetCanAdvance(s)) return
+  const period = 1000 / SHEET.fps
+  let due = performance.now() + period
+  const tick = () => {
+    const now = performance.now()
+    if (now >= due) {
+      // Recover small scheduling slips without replaying a burst after a long stall.
+      const elapsed = 1 + Math.floor((now - due) / period)
+      due = elapsed > 3 ? now + period : due + elapsed * period
+      draw(Math.min(elapsed, 3))
+    }
+    if (s.timer !== null && sheetCanAdvance(s)) schedule()
+    else s.timer = null
+  }
+  const schedule = () => { s.timer = setTimeout(tick, Math.max(1, Math.ceil(due - performance.now()))) }
+  schedule()
+}
+function sheetTick(steps = 1) {
   const s = sheet
   if (pageHidden || !sheetCanAdvance(s)) return
   auraPulse()   // 和这一帧一起出，不多出一帧
-  sheetStep(s)
+  while (steps-- > 0 && sheetCanAdvance(s)) sheetStep(s)
   sheetDraw()
   if (s.cycle && !s.cycled && s.frame >= s.cycle[0]) { s.cycled = true; s.onCycle?.() }   // 起步动作演完、开始迈步
   if (sheet === s && !sheetCanAdvance(s)) updateAnimationTimers()
@@ -58,7 +80,7 @@ function playSheet(a, still, key = null) {
   // 原来每次都重新读、重新解码（约 0.3 秒，画面停在半路）再交叉淡入，走路收尾、睡醒、收起零食、点击重播时看着是卡一下、叠个重影再换掉（2026-11-07 用户反馈向左跑收尾生硬）
   const prev = sheet
   if (prev?.img && prev.asset === asset && prev.key === key && sheetFront === prev.canvas && !prev.cancelLoad) {
-    clearInterval(prev.timer); prev.cancelLoad?.()
+    stopSheetClock(prev); prev.cancelLoad?.()
     Object.assign(s, { canvas: prev.canvas, img: prev.img, layoutVersion: prev.layoutVersion, dpr: prev.dpr })
     prev.img = null   // 交给新的这份，别在 disposeSheet 里关掉
     sheet = s
@@ -68,7 +90,7 @@ function playSheet(a, still, key = null) {
     if (still) setTimeout(() => { if (sheet === s) showImage(still, true) }, 450)
     return
   }
-  // 换成另一张图：新图解码（约 0.3 秒）和交叉淡入的这段时间，旧动画接着往下播（原来停在半路不动，换动作时先定格一下）
+  // 新图解码时旧动作照常播，等新首帧画好再冻结旧动作并淡出。
   if (prev?.img && sheetFront === prev.canvas) fadeOut(prev)
   else disposeSheet()
   if (fading && fading.canvas === s.canvas) endFade()   // 新图要画到这块画布上：淡出的那个先停
@@ -81,14 +103,19 @@ function playSheet(a, still, key = null) {
     s.img = img
     sheetDraw()
     const old = sheetFront
+    const outgoing = fading
+    if (outgoing) stopSheetClock(outgoing)
     s.canvas.classList.add('on'); if (old && old !== s.canvas) old.classList.remove('on')
     sheetFront = s.canvas
     document.documentElement.classList.add('sheet-on')
     updateAnimationTimers()
     upgradeScaledSheet()
     if (still) setTimeout(() => { if (sheet === s) showImage(still, true) }, 450)
-    if (old && old !== s.canvas) setTimeout(() => { if (sheetFront !== old) { endFade(old); old.width = 1; old.height = 1 } }, 450)   // 淡出后放掉旧画布
-    setTimeout(() => { if (fading && fading.canvas !== sheetFront) endFade() }, 450)   // 不管从哪来的，淡出完就停
+    if (outgoing) setTimeout(() => {
+      if (fading !== outgoing) return
+      endFade()
+      outgoing.canvas.width = 1; outgoing.canvas.height = 1
+    }, 220)
   }
   const failed = () => {
     if (sheet !== s) return
@@ -176,34 +203,40 @@ function loadSheet(url, done, fail) {
     releaseUrl()
   }
 }
-// 正在淡出的旧动画：单独按 12 帧接着播，淡出完（或者又换了别的）再停、放掉它的图
+// 旧动作在接班首帧未就绪时继续播；交接后只保留最后画出来的画面。
 let fading = null
+function advanceFadingSheet(steps) {
+  if (pageHidden) return
+  while (steps-- > 0 && sheetCanAdvance(fading)) sheetStep(fading)
+  sheetDraw(fading)
+}
 function fadeOut(s) {
   endFade()
-  clearInterval(s.timer); s.timer = null; s.cancelLoad?.()
+  stopSheetClock(s); s.cancelLoad?.()
   fading = s
-  s.fadeTimer = setInterval(() => { if (!pageHidden && sheetCanAdvance(s)) { sheetStep(s); sheetDraw(s) } }, 1000 / SHEET.fps)
+  startSheetClock(s, advanceFadingSheet)
 }
 function endFade(canvas = null) {
   const f = fading
   if (!f || (canvas && f.canvas !== canvas)) return
-  fading = null; clearInterval(f.fadeTimer); f.img?.close?.(); f.img = null
+  fading = null; stopSheetClock(f); f.img?.close?.(); f.img = null
 }
 function disposeSheet() {
   if (!sheet) return
-  clearInterval(sheet.timer)
+  stopSheetClock(sheet)
   sheet.cancelLoad?.()
   sheet.img?.close?.()
   sheet = null
 }
 function stopSheet() {
-  if (sheet?.img && sheetFront === sheet.canvas) { fadeOut(sheet); sheet = null }   // 淡出时接着播，不停在半路
+  if (sheet?.img && sheetFront === sheet.canvas) { fadeOut(sheet); sheet = null }
   else disposeSheet()
-  updateAnimationTimers()
-  if (!sheetFront && !document.documentElement.classList.contains('sheet-on')) return
+  if (!sheetFront && !document.documentElement.classList.contains('sheet-on')) { updateAnimationTimers(); return }
+  if (fading) stopSheetClock(fading)
   for (const c of sheetCanvases) c.classList.remove('on')
   sheetFront = null
   document.documentElement.classList.remove('sheet-on')
+  updateAnimationTimers()
   clearTimeout(sheetReleaseTimer)
-  sheetReleaseTimer = setTimeout(() => { if (!sheet) { endFade(); for (const c of sheetCanvases) { c.width = 1; c.height = 1 } } }, 450)
+  sheetReleaseTimer = setTimeout(() => { if (!sheet) { endFade(); for (const c of sheetCanvases) { c.width = 1; c.height = 1 } } }, 220)
 }

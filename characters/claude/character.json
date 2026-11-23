@@ -326,8 +326,7 @@
     "stagger": { "seq": ["stagger", "stagger-m1", "stagger-2", "stagger-m2", "stagger-3"], "ms": [300, 150, 300, 150] },
     "faceplant": { "seq": ["faceplant", "faceplant-m1", "faceplant-2"], "ms": [600, 200] },
     "fallen": { "seq": ["fallen-1", "fallen", "fallen-m1", "fallen-2"], "ms": [300, 700, 200] },
-    "delegating": { "seq": ["delegating", "delegating-m1", "delegating-2", "delegating-m2", "delegating-m2b", "delegating-3", "delegating-m3", "delegating-m3b"], "ms": [1600, 150, 1400, 120, 120, 1100, 120, 120], "loop": true },
-    "searching": { "seq": ["searching", "searching-m1", "searching-2", "searching-m1"], "ms": [1550, 150, 1550, 150], "loop": true }
+    "delegating": { "seq": ["delegating", "delegating-m1", "delegating-2", "delegating-m2", "delegating-m2b", "delegating-3", "delegating-m3", "delegating-m3b"], "ms": [1600, 150, 1400, 120, 120, 1100, 120, 120], "loop": true }
   },
   "animations": {
     "idle": { "sheets": ["待机呼吸休闲"], "loop": true },
@@ -335,6 +334,7 @@
     "listening": { "sheets": ["轻快记录"], "from": 10, "loop": true },
     "writing": { "sheets": ["写代码"], "loop": true },
     "reading": { "sheets": ["看书-翻页"], "loop": true },
+    "searching": { "sheets": ["查资料-扫读翻页"], "to": 67, "cycle": [42, 67], "exit": { "from": 68, "to": 96 } },
     "running": { "sheets": ["工作状态-忙碌点按"], "loop": true },
     "compact": { "sheets": ["工作状态-清点归档"], "loop": true },
     "sleeping": { "sheets": ["原地小憩沉眠"], "to": 76, "hold": [28, 76], "exit": { "from": 77 } },

@@ -15,13 +15,13 @@ mood.setHidden(false);moodTimers.get(mood.timer)();assert.equal(settled,2);mood.
 let completed = 0, active = false; const finishes = [];
 const clicks = new ClickSequence(done => { finishes.push(done); return () => {}; }, on => { active = on; });
 clicks.play(() => completed++, true);
-assert.equal(completed, 0); assert.equal(active, true);
+assert.equal(completed, 1, 'bounce delayed the click'); assert.equal(active, true);
 clicks.play(() => completed++, true); clicks.play(() => completed++, true);
-finishes[0](); assert.equal(completed,0,'old animation completed after restart');
-finishes.at(-1)(); assert.equal(completed,3,'rapid taps lost their interaction effects'); assert.equal(active,false);
+finishes[0](); assert.equal(completed,3,'rapid taps lost or duplicated their interaction effects'); assert.equal(active,true);
+finishes.at(-1)(); assert.equal(completed,3,'bounce completion replayed a click'); assert.equal(active,false);
 clicks.play(() => completed++,true); const canceled=finishes.at(-1); clicks.cancel(); canceled();
-assert.equal(completed,3,'canceled click overrode a newer work/drag event');
-clicks.play(()=>completed++,false); assert.equal(completed,4,'disabled animation delayed normal interaction');
+assert.equal(completed,4,'canceled bounce replayed a click');
+clicks.play(()=>completed++,false); assert.equal(completed,5,'disabled animation delayed normal interaction');
 const defaults = idle.normalize({});
 const context = { pose: 'idle', quiet: 200000, available: ['hum','stretch','yawn','clawd'] };
 assert.equal(idle.candidates(defaults, context).length, 4);
