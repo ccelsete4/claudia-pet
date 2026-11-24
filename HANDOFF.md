@@ -1,6 +1,192 @@
 # claudia-pet 开发交接
 
-更新：2026-11-15。本文描述当前工作区。**0.4.1 已发版（2026-11-10 晚）**：窗口跟随修复、桌面模式、多开（见「0.4.1」一节）。此前 **0.4.0 已发版（2026-11-10）**：0.3.0（11-07）之后的新动作（「之后」）和 11-08～10 的菜单修复、动作精简与重排（「2026-11-08～10」）一起发布，用户定不发 0.3.1。发版记录见 `docs/PUBLISHING_AUDIT.md`。
+更新：2026-11-22（开头「现在的状态」，在 Linux 虚拟机里又核对了一遍）。本文描述当前工作区。**0.4.2 已发版（2026-11-16）**：下面「下一步」里列的额度、圣诞树 v2、台词和运行方式都已随 0.4.2 提交、推送并发布（`9fc0e3a`），记录见 `docs/PUBLISHING_AUDIT.md`。**0.4.1 已发版（2026-11-10 晚）**：窗口跟随修复、桌面模式、多开（见「0.4.1」一节）。此前 **0.4.0 已发版（2026-11-10）**：0.3.0（11-07）之后的新动作（「之后」）和 11-08～10 的菜单修复、动作精简与重排（「2026-11-08～10」）一起发布，用户定不发 0.3.1。发版记录见 `docs/PUBLISHING_AUDIT.md`。
+
+## 2026-11-24 下午：忙碌动画（已提交，未推送）
+- 用户定：多会话的「忙碌」「忙不过来」各一套，不分左右；切换动作一律淡入淡出（照 dsh-pet），回待机时把这一圈播完；只管同一动作长时间循环要顺。
+- 忙碌：Wan 3.0 8 秒，提示词 `prompt_busy_v2.txt`（快速左右看、不点头、不笑、平嘴、额角小汗珠——汗珠基本没画出来，用户接受）。视频 `D:\video llm\视频\忙碌\忙碌-v2-Wan3.0.mp4`。模型开头自己换了站姿，所以取原片第 15–207 帧（`--start 15 --step 2 --frames 97`，`--one-lut`）。配置 from 16、cycle [51, 81]（一直在转头，不站直）、exit 播到 96；look 标看左/看右帧段，卡片跟着亮；菜单点播时摆两张示意卡片。
+- 下一个：忙不过来（swamped），现在还是左右两张静态图。
+
+## 2026-11-24：派活动画 + 窗口加宽（`0d5ae2f`、`543b040` 已推送）
+- 布偶出窗口的解法：窗口 260 → 330（Windows `Pet.cs`、Linux `pet.py`、`web/text-size.js`），Windows 碰边改按人物本体（`Pet.Follow.cs` 的 `BodyMargins` / `ClampToArea`，移植自 Linux `body_margins`），顺带修好 Windows 撞边离屏幕边空一截。合成脚本里「往中间挤」那段已删。Windows 全部测试 + `-MotionTests` 通过（`tests/MotionHandoff.cs` 改成 330），用户两边看过。
+
+### 下面是凌晨停下时的记录（已过时，留作经过）
+- 设计：她左手抱书、右手指挥，两只 Clawd 样子的方块小布偶绕她脚边跑圈。视频 `D:\video llm\视频\派活\派活-v3-Wan3.0-布偶跑圈指挥.mp4`（10 秒、30 帧/秒）。另一段 `派活-循环v1-…-不用.mp4` 用户说不用。用户定：**不再生成视频**。
+- 精灵图流程：`video_to_sheet.py … --step 2 --frames 150 --loop --sr`（快动作别用 2.5 混合，会出残影）→ `lab_match.py … --mask-first --one-lut`（布偶会把颜色带偏、跑过脸前会闪）→ 得到 `D:\video llm\输出\派活\派活-v3-校色后-150帧.webp` → **`compose_layers.py`**（要 scipy，在 Linux 用临时 venv 跑）分层重拼成 171 帧：入场 0–87 原样，循环 88–129（她手势 80–121 + 布偶半圈 88–108 播两遍），离场 130–170。每帧先按头部对齐抵消晃动；她整个人用她的帧（不横切，横切会出发尾残影），帧里原本的布偶挖掉用第 0 帧补；布偶按和第 0 帧的差抠（只留贴地或够大的块）再叠上；最后反推半透明处的绿幕。用户 Linux 实看「动画没问题了」。
+- 仓库里已改（未提交）：`characters/claude/anim/派活-小帮手跑圈.webp`（SHA 79ee2529c7d732a2，已装 Linux）、`character.json` 的 delegating（fps 15、frames 171、cycle [88,129]、exit.continue）、8 张静态派活图 git mv 进 archive、`SOURCE.md` / `NOTICE.md` / archive README、`web/sheet-player.js` + `index.html`（animations[].fps / frames、exit.continue / exit.jump）、`index.html` startFlip 减少动画也翻页（Linux xsettings 关动画导致只显示一张）、`test-anim` / `test-flip`、`plugin/hooks/register.ts`（子代理事件 agentId：保持派活、不庆祝不通知）。**Windows 上这批还没跑测试**（要跑 test-anim、test-flip、test-mood 再构建安装）。
+- **没解决**：离场时两只布偶站在两端，跑出桌宠窗口（窗口 260 宽，只显示精灵图第 122–528 列，布偶到第 77–556 列）。两条路：
+  1. `compose_layers.py` 里已写了一半的「布偶往中间挤」（VIEW/K/clawd_parts，按是否盖在她轮廓里决定画在她前还是后）：**写了没跑、没审查**，里面还有一行没用的 `soft = …` 要删。
+  2. 用户提议：把窗口变宽，点击仍只认人物。点击穿透两边都已按 hitRects 做；Linux 碰边按 `body_margins()`（取最大的 hitRect）算，窗口变宽不影响；**Windows 碰边是不是也按人物算还没查完**（`Pet.Follow.cs` 的 WorkArea / AreaRect 附近）。用户倾向这条，明天先查完 Windows 再定。
+- 用户要求：每版成品**先逐帧审查**（全部帧缩略 + 发尾等细节放大到原尺寸）再给他看；token 随便花。
+
+## 2026-11-23 晚：自制动画「有事问你-举手」（`2b2bded` 已推送；之前 `9c38c03` Linux 修复、`6ed4e33` 查资料动画也已推送）
+- 改用 LibTV 出片（不再用 Comfy），模型 Wan 3.0 标准版（32 积分/8 秒）。跑了 4 版：v1 手变大、v2 歪头变转头+斜眼、v3 嘴一直 O 型开合（用户不喜欢）、v4 采用。教训全在 `D:\video llm\工作流\提示词经验.md`（身体比例、嘴型、用户偏好、Wan 后期）。提示词 `prompt_asking_v4.txt`，视频 `D:\video llm\视频\有事问你\有事问你-v4-Wan3.0-采用.mp4`（11-23 起视频按动作放在 `D:\video llm\视频\` 下）。
+- `video_to_sheet.py` 改了：抠像按每帧四边实测底色定阈值（Wan 整幅去饱和，绿底只有 (90~110,160,95~105)）；`--step` 可为小数，Wan 30 帧/秒用 `--step 2.5`，半帧处前后两帧各半混合（取整会 2、3 交替，动作忽快忽慢）。
+- 配置：`"asking": { to: 47, cycle: [33, 47], exit: { from: 48, to: 95, continue: true } }`。Wan 后半段整体偏了，循环两头和放手对不上，所以新增 `exit.continue`（`web/index.html` 的 `leaveVia`）：离场从当前帧一直正着播到结尾，不跳、不倒放；回答后她会再摆 2～5 秒手才放下。睡觉不用这个。
+- Windows 上 test-anim、test-mood 在 hold 版通过并装过；最终版（cycle + continue）的测试命令已给用户，用户两边看过说可以。**最终版在 Windows 上的测试结果没回报。**
+- 下一个动作按顺序：派活（delegating）→ 忙碌 / 忙不过来。
+
+## 2026-11-23：换到新虚拟机（Debian 13 + Openbox，外面套着 cage）上装 Linux 版（**`linux/claudia/main.py` 三处修复未提交**）
+- 仓库在这台机器上是 `/c/Users/ASUS/claudia`（sshfs 挂的 Windows 仓库）。`main` 已到 `ee69ccd`（Codex 合了 PR #7：PR #6 的 60 帧、内置角色从安装目录读等）；工作区还有用户 / Codex 没提交的一批改动（新的查资料动画 `查资料-扫读翻页.webp`、查资料静态图移进 archive 等），装的时候一起装进去了。
+- 用户要：不跟随 Claude 窗口（这台没有 GNOME，本来也用不了扩展），但跟着 Claude 启动 / 退出 → 运行方式「跟着 Claude，待在桌面上」。装法：用户 `sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 libnotify-bin gir1.2-notify-0.7 gir1.2-ayatanaappindicator3-0.1 picom`，然后 `sh linux/install.sh --connect --no-extension`。插件接入写进了 `CLAUDE_CONFIG_DIR`（`/tmp/runtime-…/paths/…/settings.json`，其实链到 `~/.local/share/cage/claude-accounts/…/config/settings.json`，持久）；MCP 加进 `~/.config/Claude/claude_desktop_config.json`（原有 `computer` 保留，备份在同目录 `.bak-claudia-20261123-180907`）。
+- 三处修复（都在 `linux/claudia/main.py`）：
+  1. 启动就崩：Debian 13（GLib 2.84、PyGObject 3.50）有 `GLibUnix` 却没有 `signal_add`（只有 `signal_add_full`），原来只接 ValueError / ImportError → 改成按顺序找 `GLibUnix.signal_add` → `GLib.unix_signal_add` → `GLibUnix.signal_add_full`。
+  2. Claude 重启后没把她拉起：这台 Claude 给 MCP 的环境只剩 6 个变量（`claude-desktop` 自己也没有 DISPLAY，再往上的 `cage-input-session` 才有；systemd 用户环境里没有；X 是 `:78` 不是 `:0`）→ 新增 `env_from_ancestors()`：沿父进程链找第一个有 DISPLAY / WAYLAND_DISPLAY 的进程补会话变量；`--ensure`、`--mcp` 一进来就补（拉起桌宠前，因为 MCP 进程很快就退、链会断）。用 `env -i` 模拟过，能补上 `:78` 和 XAUTHORITY、连得上。**真机「完全退出 Claude 再打开」还没验证。**
+  3. 背景是黑的：这个桌面没有合成器 → 新增 `ensure_compositor()`：X11 下没人占 `_NET_WM_CM_S0` 且装了 picom，就 `picom --config /dev/null --backend xrender -b`（不读默认配置 = 没阴影、淡入淡出；纯软件合成）。cage 的会话脚本是系统的、没有用户自启入口，所以让桌宠跟着自己起来时拉。停掉 picom 后测过能拉起来；重启虚拟机后验证通过。
+  4. 时不时出现黑方块、偶尔整屏发黑：这台屏幕是 Xtigervnc :78（无显卡），picom 默认只重画变化区域（use-damage），在 VNC 上漏画 → 参数加 `--no-use-damage --no-vsync`，日志写到 `~/.claudia/picom.log`。用户实测没问题了（CPU 几乎为 0）。
+- 系统通知失败：这个桌面没有通知服务（`org.freedesktop.Notifications`），要的话另装一个（如 `dunst`）——没做。
+
+## 交接（2026-11-22 晚，上下文快满时写）——最先读这一节
+
+### Codex 补记（2026-11-22 晚）
+
+- GitHub 与本地 `main` 已到 `ee69ccd`（PR #7）。PR #6 的循环动画限帧和内置角色直读已适配 Windows、Linux 并合入，保留 littlepec 的提交作者，额度逻辑沿用原行为。PR #6 已回复并关闭。最新正式版仍为 `v0.4.2`。
+- Issue #2：报告者已回日志，原因是 Windows「辅助功能 → 文字大小」120%。在用户本机保持文字大小 120%、显示缩放 100%，用新版隔离实例启动，WebView2 实测得到 `217×302`（画布 `260×362`）。`refit` 缩放约 83.4%，短气泡和三行气泡完整显示。新版还未发布，用户决定先暂缓公开回复，保留 Issue，发布后可请报告者用新版复测。
+- Issue #1：空气吉他 v2 已从 `main` 移除（`27a4e06`）。已告知报告者素材本身有问题，用户决定先等对方回复。
+- macOS（Issue #4、PR #5）：用户没有 Mac，倾向让主仓库继续维护 Windows / Linux，由贡献者自行维护 macOS fork。#4 是 Swift fork，已有 Claude 窗口跟随。#5 是 Python/PyObjC，有多开，尚无 Claude 窗口跟随，当前与 `main` 有冲突。GitHub 状态均为打开，公开回复先给用户看稿。
+
+以下保留当晚较早的记录。
+
+- **GitHub `main` = 本地 `main` = `f199f42`**（11-22 用 `git ls-remote` 核实）。今天推上去的：`f6b574c` 工作区统一 LF（`.gitattributes`）、`b85f791` Linux 最小化 / 托盘 / 拖动计时器修复、`27a4e06` 去掉空气吉他 v2（issue #1）、`3565c67` Windows 桌宠窗口换成 DirectHost + 网页 `refit` 铺满 + 鼠标转发（换屏缩放根治、issue #2 兜底）、`f199f42` 右键 / 托盘菜单按所在屏幕的缩放显示。Release 仍是 `v0.4.2`，这些都**还没发版**。工作区只剩 `HANDOFF.md`（只留本机）和旧的 `CODEX_HANDOFF_2026-11-10.md`（未跟踪）。
+- 都在 Windows 上编译、`-MotionTests`、7 个网页测试过了，用户实机测过（细节见下面各节）。没测的：占用变化。
+- 工作方式（用户定）：以后在 **Linux 虚拟机里的 Claude** 干活，Windows 版和 Linux 版都在这个共享目录改（Linux 路径 `/media/sf_claude_ws_claudia_8d75acbe4023`，Windows 上就是 `C:\Users\ASUS\claudia`）。Linux 改完跑 `sh linux/install.sh`；Windows 由用户在 PowerShell 里跑 Claude 给的**一整行命令**（要带 `Set-Location C:\Users\ASUS\claudia`，用户要求能一键粘贴）。推送：用户已在 `.claude/settings.local.json` 加了 `Bash(git push origin main)`，用户说推再推。git 在 Linux 上已设 safe.directory；没配作者，提交时用 `-c user.name=kirito1207 -c user.email=327070581+kirito1207@users.noreply.github.com`，不加 Claude 署名。
+- 公开发言（issue / PR 回复）**一律先把稿子给用户看**（11-22 有一次没给稿就在 #2 下发了请对方贴日志的回复）。
+- **还没处理、等用户定的**：
+  - issue #1 已修（`27a4e06`），要不要回复并关闭——先给稿。
+  - issue #2：已请报告者贴 `windows.log`，还没回音；`refit` 应能兜住被裁，DirectHost 也可能顺带修好，等他反馈。
+  - PR #6（littlepec）：用户定收 ① 60 帧（`c0b59c4`）② 内置角色从安装目录读（`0f6565a`），**不收** ③ 额度（`6a29e9e`），但说「PR 先不做」。注意 ① 改的是 `web/index.html`，今天 `3565c67` 也大改了它，cherry-pick 可能要手工合。做法：本地 cherry-pick 两个提交（保留作者）→ 测 → 推 → PR 下说明（先给稿）→ 关。不能点合并按钮（三个一起收）。本地有引用 `pr/6`。
+  - PR #5（Skrrrrry，Python/PyObjC，和 Linux 版同构，没跟随 Claude 窗口，有冲突）和 issue #4（FLynn1213，Swift fork，有跟随 Claude 窗口）：用户还没定要不要支持 macOS。两者对比见下面「其他 11-22 事项」前后的记录和本次对话结论（Claude 倾向：要支持就收 PR #5，请他变基）。
+  - Linux 版：拖动 Claude 时跟随延迟（快拖落后约 170 像素）；拖动后偶发崩溃（已开 faulthandler，再崩看 `~/.claudia/stderr.log`）。
+  - 查资料动画 v4：要先给 Comfy 充值约 170 积分。
+- 用户 Windows 上的运行方式现在是「独立运行」（为了不开 Claude 测试改的），要不要改回「跟着 Claude」用户没说。
+
+## 交接给下一个对话（2026-11-18 晚起，11-21 核对过现状）——先读这一节
+
+### 现在的状态（2026-11-21 核对，11-22 复核）
+- **11-22 复核（在 Linux 虚拟机里经共享文件夹看的同一个仓库）**：提交历史和下面一致，`main` 仍在 `fdb1cbf`，`git ls-remote` 核实 GitHub 上的 `main` 也是 `fdb1cbf`。真正改了内容、没提交的仍然只有 `HANDOFF.md`。
+  - **远端不止 `main`**（下面「远端只有 `main`」已过时）：还有分支 `linux-port`（停在 `7310289`，PR #3 已于 11-17 合并，内容已经由 `a6c3345` 同步进 `main`，分支没删）；以及两个**外部贡献者开着、没处理的 PR**（11-22 用 `gh` 只读查的）：
+    - **#6**（littlepec，11-20，分支 `perf-fixes`，+84 -51）「Cap looping body animations at 60fps, load bundled characters in place, and keep quota across session start」：改 `Store.cs`、`register.ts`、`web/index.html` 等。GitHub 显示可以自动合并，但 `register.ts` 和 `index.html` 正是 Codex 在 `fdb1cbf` 里大改过的地方；「会话开始时保留额度」可能和 0.4.2 定的「会话开始没有认得的额度就清空」相反。**要逐行看过再决定，没看。**
+    - **#5**（Skrrrrry，11-19，分支 `macos-port`，+3832 -6）「Add a macOS shell for the pet」：新增 `macos/` 整套外壳，和现在的 `main` 有冲突（CONFLICTING）。**没看。**
+  - ⚠️ 在 Linux 里 `git status` 会显示另外 98 个文件「已修改」，**全是换行符差异**（Windows 签出是 CRLF，Linux 的 git 按 LF 比），`git diff --ignore-cr-at-eol` 下内容一字没变、也没有权限变化。**不要在 Linux 里提交或 `git add` 这些文件**，提交在 Windows 上做。
+  - 在 Linux 里用 git 会报「dubious ownership」（共享文件夹属主是 root），用 `git -c safe.directory=<路径> …` 临时放行即可，没改全局配置。
+  - 这台虚拟机没有 Node，7 个网页测试没跑；`tests/test_linux_store.py`（Codex 加的）在这里跑了，2 条全过。
+
+### 2026-11-22：Linux 版三个问题（Ubuntu 虚拟机，GNOME 50.1，Wayland，桌宠走 XWayland）——**已提交 `b85f791`，已推送**
+改动在仓库 `linux/claudia/xshape.py`、`pet.py`、`main.py`。用户在虚拟机里实测「基本上没问题了」。
+- **最小化 Claude 后她停在原地不动、切回来又接着动**：扩展报了最小化，桌宠也把窗口外形设成了「零个矩形」并暂停网页，X 服务器也确认外形已空——但 **Mutter 不认空外形**，屏幕上还是窗口最后一帧（网页暂停了，所以看着「卡住」）。改成隐藏时外形留左上角 1×1（人物外面、本来透明）。随后发现 **Mutter 也不认「取消外形」**（`XShapeCombineMask` 给 None），1×1 之后她就再也不出来了；显示时改成设一个 32767×32767 的大矩形（服务器按窗口大小截掉，改尺寸也不用重设）。`xshape.py` 的 `set_visible`。
+- **点 Claude 右上角 × 收进托盘后，桌面上多出一只能拖的**：Linux 版原来「扩展找不到 Claude 窗口就去桌面」，不管运行方式；Windows 版是只有独立运行才去桌面。改成：这次运行里找到过 Claude 窗口、后来没了（= 托盘）→ 跟着 Claude 时藏起来、独立运行时去桌面；从启动起一次都没找到（可能扩展认不出这个 Claude）→ 照旧先待桌面。`pet.py` 的 `want_desktop` + `claude_window_seen`。
+- **拖动后 `pet.py:840: Warning: Source ID … was not found`**：`pump_pointer` 松手时返回 False（GLib 自己删计时器）却没清 `self.drag_timer`，`stop_motion` 再删一次旧编号。已清空。
+- 实测（每 20 ms 同时读扩展报的 Claude 位置、桌宠窗口位置和外形，120 秒）：最小化两次都 1×1 隐藏、恢复都整窗显示；点 × 两次扩展报 `found=False`，她保持隐藏、没去桌面，Claude 再打开回原位。
+
+### 代码放在哪、怎么改（2026-11-22 用户定）
+- 用户以后在 **Linux 虚拟机里的 Claude** 干活；**Windows 版和 Linux 版都在这个共享目录（仓库）里改**，它是唯一的源码。Linux 里路径 `/media/sf_claude_ws_claudia_8d75acbe4023`。
+- 链条：共享目录 → 在 Linux 上直接 `sh linux/install.sh`（不带 `--connect`）→ 安装版 `~/.local/share/claudia-pet` → Claude 桌面端 MCP（`~/.config/Claude/claude_desktop_config.json` 的 `claudia-pet.command` = `~/.local/bin/claudia-pet`）和 Claude Code 插件（`~/.claude/settings.json` 的 `CLAUDE_CODE_PLUGIN_DIRS` 只剩 `~/.local/share/claudia-pet/plugin`）**都只用安装版**。改了 Linux 代码 → 重新跑一次 install.sh。11-22 两处配置都已改；之前插件目录里同时列了旧签出和安装版，插件被加载了两次。
+- 工作区统一 LF：`f6b574c` 加了 `.gitattributes`（`* text=auto eol=lf`，图片等标成 binary）。仓库里存的本来就全是 LF，所以没有内容变化；工作区原来 97 个 CRLF 文本文件已就地改成 LF（逐字节核对只改了换行）。之后 Windows 签出也会是 LF——**回到 Windows 时构建一次确认**（C#、PowerShell 7、Node 都认 LF，按理没问题，没实测）。
+- 在 Linux 里用 git：共享目录属主是 root，git 会报「dubious ownership」；用户 11-22 已自己把它加进 `safe.directory`，现在直接用 `git`。这台 Linux 的 git 没配 user.name/email，提交时用 `-c user.name=kirito1207 -c user.email=327070581+kirito1207@users.noreply.github.com`（和以往提交一致，不加 Claude 署名）。
+- 11-22 收尾：`f6b574c`（.gitattributes）、`b85f791`（Linux 三处修复）用户已自己推送，`git ls-remote` 核实 GitHub `main` = `b85f791`。用户重启 Claude 桌面端后，桌宠和 MCP 都从安装版运行；旧签出 `/home/kirito/code/claudia-pet`（644 MB，核对过没有未推送提交、stash，未提交内容仓库里都有）用 `gio trash` **移到了回收站**，没永久删，要找回去回收站。
+- 推送权限：项目 `.claude/settings.local.json` 里原有 Windows 用的 `PowerShell(git push -u origin main)`；Linux 用 Bash 工具，要另加 `Bash(git push origin main)`（Claude 告诉了用户加法，由用户自己加；加没加没核对）。有权限也照旧：推送前要用户明确说。
+
+### 2026-11-22：Windows 版换屏 / 换缩放后人物变小、显示不全（**最终：换成 CrossPet 的 DirectHost 窗口根治；11-22 Windows 上编译、`-MotionTests` 3 项、7 个网页测试都过了，已装到本机；**用户实机测过：显示和透明、点空白处穿透、单击、拖动和甩、右键和设置页、层级（跟 Claude / 桌面置顶）、隐藏快捷键（用户设的是 Ctrl+Alt+H）、藏着时点得透、走路都正常；外接 1080p 100% ↔ 笔记本 2K 150% 来回切、各种重启组合，大小都一致**。日志干净：每次切屏只有一行「系统缩放变了：现在 N%」，没有对不上、没有报错，旧窗口每次启动那个假的「100% → 100%」也没了。占用没测。已提交 `3565c67`、已推送**。test-anim 很慢，看着像卡住，等一会儿就过了）
+- 现象（用户实测）：笔记本 2K 16 吋 150% 和外接 1080p 24 吋 100% 之间切换（或运行中改系统缩放），她会缩小一圈；重启后又是正常大小。用户定：重启后的大小才是对的，切换后变小要修。
+- 日志（用户 Windows 的 `windows.log`，WebView2 157.0.4341.60）：100%→150% 后网页 174×242、应为 260×362（正好 1/1.5，网页区域停在旧缩放的像素上）；`ResizeWebBounds` 补对齐两次都没成；接着 `ZoomCheck.Fix` 把它当成「系统缩放算了两遍」（指纹恰好相同），网页缩放改成 0.667 → 人物缩小。150%→100% 反过来同样一遍、又改回 1。
+- 第一版改法（重建网页控件）**没用**：同日 19:41 / 19:42 日志，补对齐两次失败后重建了网页控件，新控件照样停在旧缩放上（150% 时 174×242、回 100% 时 390×543）——错的不在控件本身，在整个 WPF 窗口那层。用户实测：重启后是正常大小；从 2K 150% 切回 1080p 100% 时网页比窗口大，只露左上角（显示不全；新加的「铺满窗口」会按偏大的网页放大，更显得被裁）。
+- 第二版（补对齐失败就自动重启程序）写了，用户定**不测、直接根治**，已撤掉（`RenderRecovery.cs` 恢复原样）。
+- **根治（用户定）：照 CrossPet 1.3.9 起的做法，桌宠窗口换成 `app/src/DirectHost.cs`**（CrossPet `app/windows/src/DirectHost.cs`，MIT，经 GitHub 接口在线读、按我们的代码改写；提交 `1fab899`、`b707b4c`）：普通 WinForms 窗口 + `WS_EX_NOREDIRECTIONBITMAP` + 普通 WebView2 子窗口（WinForms 版），网页由 DWM 直接合成、逐像素透明；普通 WebView2 子窗口自己跟着显示器缩放走；画面不经界面线程，外壳也不再每帧拷画面（理论上占用会降，没测）。网页内容（精灵图动画、canvas）照常由 WebView2 画，显示应该和原来一样。
+  - `DirectHost.cs`：每 30 ms 按鼠标在不在能点区域里切 `WS_EX_TRANSPARENT`（按住左键时不切）；`ForcePassThrough`（藏起来时整个穿透）；`SetVisible`（不透明度 0/255，代替 WPF 的 Opacity）；`MessageHook`（快捷键 WM_HOTKEY）；截 `WM_DPICHANGED` 发 `DpiScaleChanged`；`DpiScale`（`GetDpiForWindow`）；`ReplaceWeb`（浏览器进程崩溃后换控件）。和 CrossPet 不同：不管置顶（我们的置顶由 `PlaceAbove` / `KeepOnTop` / `SwitchArea` 直接调系统）；去掉它的「按 Ctrl 让开」；拖动不走系统 `DragMove`，接我们自己的物理。
+  - 网页 `index.html` 加 `setPointerBridge`（照 CrossPet）：按下 `{pointer:'down'}`（我们加的：外壳记下按下时的屏幕坐标，物理要知道从哪儿拎起来）、移动 >4px `{pointer:'drag'}`、单击 `{pointer:'click',x,y}`（画布坐标）、右键 `{pointer:'menu'}`；外壳在页面加载完调 `setPointerBridge(true)`。Linux 外壳不调，不受影响（已装上验证）。
+  - `Pet.Mouse.cs` 重写：去掉 WPF 透明画布 `hit`；`UpdateHitRects` 把网页报来的画布坐标 × (窗口物理宽 / 画布宽) 交给 `Host.SetHitRects`；`HandlePointer` 接网页的 pointer 消息（down → StopMotion、记坐标；drag → 按键还按着才 `BeginDrag`；click → `handleClick`；menu → `ShowMenu`）。松手照旧由拖动物理每帧看物理按键（`releasedEarly`）。
+  - `Pet.Physics.cs` / `Pet.Walk.cs`：每帧原来挂 WPF 的 `CompositionTarget.Rendering`，没有 WPF 窗口在画后不一定来，改成 16 ms 的 `DispatcherTimer`（Render 优先级）。
+  - `Pet.cs`：`Window`/`grid`/`WebView2CompositionControl` → `Host`/`WebView2`（WinForms）；`ui` = 当前 Dispatcher 代替 `Window.Dispatcher`；换缩放时 `ApplyScale(…, Anchor.Feet)` 按新缩放重设物理像素大小；崩溃恢复用 `Host.ReplaceWeb()`。
+  - `Pet.Settings.cs`：`ResizeHost`（物理像素 = 画布 × 人物大小 × `DpiScale`）；删掉只为旧控件的 `ResyncWebForDpi`、`ResizeWebBounds` 和「停在旧缩放上」那一整套；`CheckZoom` 只留日志和 `Fix`（「缩放算了两遍」），网页还有 `refit` 兜底。`ZoomCheck.StuckAtOldDpi` 现在没人调用，留着没删。
+  - `Pet.Layer.cs`：藏起来改用 `Host.SetVisible(false)` + `Host.ForcePassThrough`；删掉「给背后的浏览器窗口加鼠标穿透」（只为旧控件，CrossPet 换完也删了）；`ApplyLayer` 改看窗口样式的置顶位。`Pet.Hotkey.cs`：`HotKeyHook` 改成 `bool (int msg, IntPtr wParam)`。`Pet.Pets.cs`：去掉 WPF 的 `Topmost`。
+  - `tests/MotionHandoff.cs`：点击区域换算、拖动交接两项改成测 `DirectHost`（`DirectHost.HitRects` 是为测试加的只读属性）。`NOTICE.md` 补了从 CrossPet 新版本移植的说明。
+  - 这台虚拟机没法编译，只做了静态检查（括号配平、删掉的成员没有残留引用、用到的成员和签名都在）。
+- **待做（Windows）**：构建 + `-MotionTests` + 7 个网页测试；装好后按清单实测：透明边缘和光晕、点空白处能穿透、单击摸头、拖动和甩（火气、撞边）、右键菜单、设置页、跟着 Claude 时的层级、桌面模式置顶、多开、隐藏快捷键（Ctrl+Alt+P）、藏起来时点得透、外接屏和笔记本屏之间来回切（大小是否和重启后一样）、走路、占用。
+- 和 issue #2 的关系：#2 报告者是 4K + 自定义缩放 169%→150%、重新登录后仍被裁，只少高度、人物完整，和这里「按比例变小」不完全一样，可能同源可能不同。11-22 已在 #2 下请他贴 `windows.log` 里「网页大小和画布对不上」那几行，并问自定义缩放是否还开着（这条回复 Claude 没先给用户看稿就发了，用户之后要求：公开发言一律先给稿子）。
+
+### 2026-11-22：右键菜单在副屏上大小不对（**已提交 `f199f42`、已推送，用户实测没问题**）
+- 现象（用户截图）：主屏是笔记本 2K 150%，切到外接 1080p 100% 上，人物大小对了，右键菜单的字和行高却大了一半。原来就有（菜单代码没动过），只是以前切屏后人物本身也不对，没人注意到菜单。
+- 原因：WinForms（.NET Framework，没在 App.config 里开按显示器缩放）里，字号换成像素、菜单的 `DeviceDpi` 都按「系统缩放」（登录时主屏）算，菜单弹到缩放不同的屏上就跟着大 / 小一圈。CrossPet 没处理（普通菜单、App.config 没开 WinForms 的按显示器缩放），没有现成做法。
+- 改法（`SoftMenu.cs` 的 `Apply`）：弹出前查鼠标所在屏的缩放（`MonitorFromPoint` + `GetDpiForMonitor`），字号和内边距乘「这块屏 ÷ 系统缩放」，宽度、箭头位置按这块屏的缩放算（不再读 `DeviceDpi`）；和系统缩放一样的屏上比例是 1、和原来完全一样。右键菜单和托盘菜单都走这里。没选 App.config 那个官方开关：它会影响整个程序的 WinForms，包括 DirectHost（换屏时窗口可能按系统建议自己改一次大小，和我们的 ApplyScale 打架），无父窗口的弹出菜单在 .NET Framework 上也不一定跟得对。
+- 验证：Windows 上编译、`-MotionTests` 过；用户在两块屏上开右键菜单都正常。
+
+### 2026-11-22：移植 CrossPet 1.3.9 的「网页自己铺满窗口」（**已改；Windows 上 7 个网页测试都过了（含 test-ui），已构建、装到本机；实机测过（用户的整套实测在 DirectHost 版上做的）；已随 `3565c67` 提交推送**）
+- 来源：CrossPet 1.3.9（11-04，我们是从 1.3.8 分出来的，所以没有）更新日志「气泡和人物有时被挤到窗口外……以前是认出一种原因修一种，现在桌宠网页会量自己实际拿到多大，对不上就整体等比缩放、正好铺满窗口」；点名的一个原因是 Windows「辅助功能 → 文本大小」不是 100% 时网页多乘了这个比例。代码照抄它 `app/web/index.html` 的 `refit`（经 GitHub 接口在线读的，没下载仓库）。
+- 改动全在 `web/index.html`：`#wrap` 外套一层 `#fit`；`setSizes` 记下画布尺寸并 `refit()`；`refit` 量 `innerWidth/innerHeight`，和画布差 1.5% 以上就把 `#fit` 等比缩放、左右居中底边对齐，`#wrap` 高度改用画布高（`--fit-h`）；`toCanvas` 把 `getBoundingClientRect` 换回画布坐标，`hitRects` 用它，外壳不用改；走路速度乘 `fit`。我们页面里交给外壳的坐标只有 `hitRects` 一处，`handleClick` 的坐标页面不用。
+- 作用：issue #2 那种「网页比画布小一截、顶上气泡被裁」不管什么原因都会整体缩小塞进窗口、不再被裁。换屏后网页区域停在旧缩放上那种它只能缩小，真正的修法是上一节的重建网页控件。
+- 验证：Linux 虚拟机内置浏览器里直接调 `refit`：画布=网页 → fit 1 不动；网页比画布大 → 放大 2.1215（理论值），居中、底边贴齐，`toCanvas` 还原成 0,0,260,362；网页比画布小 → 缩小 0.8533（理论值），整块在网页里、顶上不裁；`hitRects` 换算回画布坐标。Linux 版装上后正常运行、没有新的网页脚本错误。**Windows 上的 7 个网页测试和实机都还没跑**（test-ui 里有量点击区域的检查，要看）。
+
+### 其他 11-22 事项（空气吉他已提交 `27a4e06`）
+- issue #1 空气吉他：作者 v2 素材里吉他只画了琴颈（我们的文件和作者原件哈希一致），`character.json` 的 `air_guitar` 改成只轮换 v1、v3，`弹空气吉他v2.webp` 已 `git rm`（删除在暂存区里），`anim/SOURCE.md` 记了原因。Linux 已 install.sh 装上。网页测试没跑。
+- PR #6：用户定收 ① 60 帧限制（`c0b59c4`）和 ② 内置角色从安装目录读（`0f6565a`），**不收** ③ 额度（`6a29e9e`），但又说「PR 先不做」，还没动 `main`。做法：本地 cherry-pick 这两个提交（作者保留 littlepec）→ 测试 → 推送 → 在 PR 下说明收了哪两项（先给用户看稿）→ 关 PR。PR 的提交已拉到本地引用 `pr/6`。不能直接点 GitHub 的合并按钮（会三个一起收）。
+- PR #5 macOS：等用户定要不要支持 macOS（用户没 Mac 没法测）。
+
+### Linux 版还没解决的（交给用户定）
+- **拖动 Claude 窗口时跟随有延迟**：同一次实测，Claude 在动时她落后中位 19 像素、90% 在 170 像素以内；Claude 停下后 0.05 秒内对齐。链路是 扩展 → D-Bus → Python → XWayland → Mutter，每段晚一两帧，虚拟机没有 3D 加速更慢。根治要让 GNOME 扩展在拖动期间直接在合成器里挪桌宠窗口（结构改动），**没做**。
+- **桌宠会崩**（原来就有，11-22 一天好几次，都在拖动桌宠之后）：`~/.claudia/stderr.log` 里是 glibc 的 `corrupted double-linked list` 后进程中止（内存损坏），`/var/crash` 没有报告。已在 `main.py` 开 `faulthandler`，下次崩时 stderr.log 里会有当时每个线程的 Python 调用栈——**再崩先看那里**。崩了以后插件下次 `--ensure` 会把她重新拉起来（用户看到的是「消失了，发消息又出现」）。
+- ~~这台虚拟机有两份代码在用~~ → 已理顺，见下面「代码放在哪、怎么改（2026-11-22 定）」。
+- MCP 服务进程拉起桌宠后不回收它：桌宠退出后留下一个僵尸进程（`<defunct>`），不占资源，没改。
+- **本机 `main` 和 GitHub `origin/main` 一致，都在 `fdb1cbf`**，工作区只有 `HANDOFF.md`（只留本机，不推）和旧的 `CODEX_HANDOFF_2026-11-10.md`（未跟踪，不提交）。Release 仍是 `v0.4.2`（latest），之后的提交**还没发版**。远端只有 `main`。
+- 本机安装版就是 `fdb1cbf`（`claudia-pet.exe` 2026-11-21 00:48 装的；安装目录的 `web/index.html` 和仓库一致，有 `sheet-player.js` 和三张 `.scaled.webp`）。
+- 0.4.2 之后的提交（作者都记为 kirito1207；这几次不是本对话做的，内容按提交读出来的）：
+  - `e111c2c`（11-17）Linux 版外壳。
+  - `7310289`（11-18）GNOME 下跟随 Claude 窗口：`linux/gnome-extension/` 里的 Shell 扩展经 D-Bus（`io.github.kirito1207.ClaudiaPet`）报告 Claude 窗口位置、最小化、工作区和遮挡；没装扩展就待在桌面。`install.sh` 装扩展，`--no-extension` 跳过。
+  - `74edf3c`（11-20）**原来本机没提交的那一大批**，内容见下面几条（静态图移出、省电模式删除、三个自制动画含小侦探）。
+  - `a6c3345`（11-20）同步 Linux 的窗口跟随和动画支持。
+  - `fdb1cbf`（11-21）「Stabilize updates and reduce desktop pet rendering overhead」：
+    - 多会话状态改成每个会话各写 `claude-session-<sid>.json`（`plugin/hooks/register.ts`），外壳读 10 分钟内改过的（`Pet.Web.cs` 的 `PollSessionStates` → 网页 `setSessionStates`）。修掉了以前「多会话读改写 `claude-sessions.json` 会丢条目」的老问题；旧插件写的 `claude-sessions.json` 仍兼容读。
+    - 待机呼吸、被拖起、原地小憩另附缩小版 `anim/*.scaled.webp`（每帧 448×252，`scripts/prepare-scaled-sheets.py` 生成），渲染尺寸用不到原图时用缩小版，省内存。见 `anim/SOURCE.md` 末尾。
+    - 精灵图读取和播放从 `index.html` 拆到 `web/sheet-player.js`。
+    - Linux：`notices.py`、`store.py`、`install.sh` 等改动，加了 `tests/test_linux_store.py`。
+    - 11-22 读代码发现、**没改**的两点（交给用户定）：
+      - `claude-session-<sid>.json` 每个会话一个，外壳只是不读超过 10 分钟的，**从不删除**，会话多了 `~/.claudia/state` 里会一直攒小文件（和以前 `claude-notify-*.json` 不清理是同一类）。
+      - 三张 `.scaled.webp` 是**无损**压缩，每张约 5.7 MB，比原图（约 2.0 MB）大近 3 倍，安装包因此多约 17 MB；省的是运行时内存（解码约 54 MB 对 110 MB）。用的条件是显示宽度 × 屏幕缩放 ≤ 448 像素（`web/sheet-player.js`）。
+- 以下是 11-18 当时记的「本机改动」，现在**都已在 `74edf3c` 里提交推送**：
+  - 已有动画的姿态不留静态图：idle、idle-blink、listening、oops、update、avatar、portrait、portrait-card、reading、reading-2、proud 共 11 张 `git mv` 到 `archive/旧立绘-已被动画替换-不再使用/`（带 README 标明是旧的，不打包）。
+  - `Store.Manifest` 有待机动画就算角色（`HasIdleSheet`）；网页里减少动画时也播精灵图、读不到改播待机动画；**省电模式整个删掉**（设置页、外壳、网页）。
+  - 网页兜底：`sheet-on` 残留（有标记却没动画，静态图全透明、人不见）每 2 秒自动清，并记日志「sheet-on 残留已清除（姿态…）」。来源没查到，再出现就看日志。
+  - 两个自制动画：`anim/看书-翻页.webp`（reading，整段循环）、`anim/得意-叉腰.webp`（proud，72 帧 `to: 71, full: true`）。来源写在 `anim/SOURCE.md` 末尾和 `NOTICE.md`。
+  - 第三个自制动画 `anim/小侦探-放大镜.webp`（`detective`，96 帧 `to: 95, full: true`）：**闲置随机，玩耍组，不限时段**，菜单「动作 → 玩耍 → 小侦探」，台词「线索在哪儿呢……」「找到了！」（Claude 起草，用户未审）。本来是查资料第 2 版，像找东西不像查资料，用户定留作随机动作。test-anim 加了一条断言。
+  - 11-18 晚 7 个网页测试、`-MotionTests` 全过（在 `74edf3c` 之前的工作区上跑的）。`fdb1cbf` 之后本对话**没有重跑测试**。
+- 云端积分：用户 Comfy 账号充了 1055，已用约 75（作废）+ 212（看书）+ 127（得意 v2 作废）+ 127（得意 v3）+ 查资料 212 + 170 + 127，**现在约 0（界面显示负数）**。查资料 v4 点运行后任务列表出现 Failed，报错没看到原文，多半是余额不足；**要先充值约 170 才能跑 v4**。
+
+### 查资料（searching）做到哪了（2026-11-18 晚）
+- 三版都没成，过程和原因全记在本机 `D:\video llm\工作流\提示词经验.md` 的「作者动作包的写法」「查资料 v1 的教训」「查资料 v2、v3」三节；提示词 `prompt_searching_v1~v4.txt`、工作流 `查资料v1~v4-*.json` 都在同目录，视频在 ComfyUI `output\video\`。
+  - v1（10 秒，放大镜一直举在眼前、从身后拿）：转成半侧脸、结尾放大镜没收走、眨单眼，作废。
+  - v2（8 秒，魔法变出放大镜、书飘到肩旁、左右探着找）：动作都对、首尾对上，但不像查资料 → 改作上面的「小侦探」。
+  - v3（6 秒，书飘到胸前自己开、翻页、放大镜扫书页）：书悬空后变大 3～4 倍、摊平朝镜头，书右半露出封面外侧，翻页糊成灰块，放大镜还是在眼前，作废。用户判断时间太紧，**以后这类动作至少 8 秒**。
+- **下一步是 v4**（`prompt_searching_v4.txt`，8 秒，工作流 `查资料v4-Seedance2.0-480p-8秒.json` 已生成、在 ComfyUI 里截图核对过，种子跑失败后被随机成 1570620036，想保持一致就改回 42）：书一直在左手里、大小按首帧写（高约脸宽一半），书页朝她自己、上沿倾向镜头约 30 度，放大镜只在书页上方，翻页一次一张给 1 秒。计划只循环 2.4～5.6 秒的扫读翻页段，开头开书只播一次，「找到了 + 合书」做离场（程序里已有 `exit` / `leaveVia` 写法，具体怎么接出片后再定）。
+- 用户定下的方向：查资料 = 书自己翻页、她拿放大镜看；道具用魔法变出来、变没；不要一直挡着眼睛；动作一直在动不发愣。
+- 作者提示词原文在工作树 `build/aboutme-upstream/pets/claude/prompts/`（`00-通用前缀.md` 是总规则），写新动作前值得翻对应那册。
+
+### 做一个新动作的流程（照这个来）
+1. 写提示词前先读本机 `D:\video llm\工作流\提示词经验.md`（首帧、构图、道具、五官、颜色、清晰度的坑都在里面）。
+2. 首尾帧：`D:\video llm\素材\idle_anim_green_1280.png`（作者待机动画第 1 帧绿底，**不要用 idle.webp**）。已在 ComfyUI 的 input 里。
+3. 提示词照作者格式：【角色】【标准姿态】【颜色】【五官】【道具】【画面】【铁律】→ 动作概述 → 按秒分割（⚠️ 强调）→ 结束状态。
+4. 做工作流：`python mkwf_seedance.py <提示词.txt> <秒数> <名字>`（在 `D:\video llm\工作流\`；默认 Seedance 2.0、480p、16:9、无音频、首尾帧 idle_anim_green_1280.png），用户在 Edge 里拖进 ComfyUI，Claude 截图（computer use，Edge 只读）核对首尾帧、模型、时长、价签后，用户点运行。**先给用户看方案再花钱。**
+5. 转精灵图：`python video_to_sheet.py <视频> <未校色.webp> --loop --sr` → `python lab_match.py <未校色.webp> <仓库>\characters\claude\anim\待机呼吸休闲.webp <最终.webp>`。
+6. 检查：脸放大看五官、逐帧人物范围不动、首尾帧差、颜色和作者对比，再换进 `anim/`、改 `character.json`、静态图 `git mv` 进 archive、改测试、构建、装到本机。
+
+价格（Seedance 2.0）：480p 约 21 积分/秒（6 秒 127、10 秒 212），720p 约 46 积分/秒。480p 加超分就够清楚。
+
+### 还差什么
+**还没做动画的姿态（21 个，44 张图）**
+| 类别 | 姿态 | 备注 |
+|---|---|---|
+| 干活 | 有事问你 asking、查资料 searching（翻页 3 张；动画在做，见上「查资料做到哪了」）、派活 delegating（翻页 8 张） | 都是循环状态 |
+| 多会话 | 忙碌 busy_left / busy_right、忙不过来 swamped_left / swamped_right | 左右两张轮换；Codex 重画的往右看三版都不合格（最后一版脚变宽），可以改成从待机出发的一段左右张望 |
+| 反应 | 道歉 sorry、累了 tired（额度见底，会停很久）、抱 Clawd clawd | |
+| 生气一串 | 不耐烦 annoyed、鼓脸 puffed、红温 redhot、赌气 sulk、被哄 coaxed、原谅你了 forgiven、晕乎乎 dizzy | 用户 11-06 定过保持静态（按火气一档档换），要换先问 |
+| 碰边 | 撞头 bonk（6）、站不稳 stagger（5）、摔倒 fallen（4）、趴地 faceplant（3） | 翻页，被甩撞边时短暂出现 |
+
+**用户提过、还没做的**
+- 「待在桌面上」要始终置顶、但**全屏应用时让开**（现在全屏也盖在上面）。
+- 动画 WebP 代替精灵图省内存（精灵图解码一张约 110 MB）：要改播放器用 ImageDecoder 逐帧解码，先拿几个动作实测再决定。
+- 「独立运行」时关掉 Claude、她留在桌面上：没实测过（要关掉 Claude 本身）。
+
+**没处理的小问题**
+- 自制动画的线条比作者略软（模型重画导致，超分只能改善）。
+- 看书打开时书封面略偏红（提示词里加「封面颜色始终是深红棕色」没测过）。
 
 ## 交接给下一个对话（2026-11-15）
 
@@ -12,15 +198,48 @@
 - 7 个网页测试和 `-MotionTests` 在 `5873fc0` 上全部通过（2026-11-10）；这些测试覆盖不到跟随、桌面模式和多开，那三样只在本机桌面上由用户实测过。
 - 作者库（hunmer/aboutme-pets）现在 `cb205c2`（11-09）。Claude 角色还是 166 个动作、精灵图没变；11-09 新加了 8 段 m4a 音频（只有 8 个动作有）和每个动作的 `"facing": "left"`，**用户定暂时不加声音**。作者 11-08 前后改写过历史：我们记的 `da5a6fe` 现在不在作者分支上了（按哈希还能打开），分支上对应的是 `e1cebca`；以后再取素材按新哈希记。
 
+### 2026-11-18：自制动画第二个「得意-叉腰」，转换流程定型（本机，未提交）
+
+- 「得意」：Seedance 2.0 480p 6 秒（72 帧，配置 `to: 71, full: true`），叉腰挺胸、踮脚轻颠、头顶小金闪光。第 2 版提示词写了「眼睛一亮、睁大」被画成闪亮大眼作废，第 3 版加五官约束后可用。`proud.webp` 移进 archive；程序原来给得意画的金色闪光（`fx.proud = victory`）在有动画时不画，现在由动画里的闪光代替。
+- 看书也重做了两次颜色：最终流程 `video_to_sheet.py --loop --sr`（BT.709 解码 + Real-ESRGAN 动漫视频模型超分 2 倍）→ `lab_match.py`（每帧 Lab 分布匹配到待机第 1 帧）。原因和数据记在本机 `D:\video llm\工作流\提示词经验.md`。
+- 7 个网页测试、-MotionTests 全过，已装到本机。角色文件夹剩 44 张静态图。
+
+### 2026-11-18：第一个自制动画「看书-翻页」（本机，未提交）
+
+- 用 ComfyUI 云端节点 Seedance 2.0（480p、10 秒、首尾帧都是作者待机第 1 帧绿底）生成，`D:\video llm\工作流\video_to_sheet.py` 抠绿、抽 12 帧、对齐成作者同规格精灵图，放进 `anim/看书-翻页.webp`；`reading` 改成整条循环，原来的翻页配置删掉，`reading.webp`、`reading-2.webp` 移进 archive。来源写进 `anim/SOURCE.md` 末尾和 `NOTICE.md`。test-flip 的循环翻页改测查资料。7 个网页测试、-MotionTests 全过，构建通过。没装到本机。
+- 提示词经验（书变大、开合变形怎么约束）记在本机 `D:\video llm\工作流\提示词经验.md`。
+- 用户定：都在本机做，大部分动作替换完再一起上传 GitHub。
+
+### 2026-11-18：静态图移出、省电模式删除（本机，未提交）
+
+- 用户定：已经有动画的姿态，静态立绘全部移出程序（之前说「替换」，其实 idle.webp、idle-blink、listening、oops、update 还留着兜底，用户不满意）。`git mv` 到 `archive/旧立绘-已被动画替换-不再使用/`（带 README 标明是旧的，不打进安装包），连同程序早就没用的 avatar、portrait、portrait-card。角色文件夹剩 47 张，都是还没做动画的姿态。
+- `Store.Manifest`：有 `animations.idle` 的精灵图也算一个角色（`HasIdleSheet`），不再要求 idle 静态图。素材同步发现文件数变了会整个替换数据目录里的角色文件夹，旧图不会残留。
+- 网页：有动画的姿态一律播动画，系统要求减少动画时也播（只删了精灵图这一条；补帧翻页只显示第一张、点击 Q 弹等其他「减少动画」处理没动）；精灵图读不出来改播待机动画（`sheet.fallback`，只试一次）。
+- **省电模式整个删掉**（设置页开关、外壳 `PowerSave`、网页 `setPowerSave`），用户说以后按程序实际另做。网页里闲着自动停特效的那段改名「特效降帧」，和设置无关。
+- 测试：test-anim 改成断言有动画的姿态没有静态图、减少动画时照样播、读不到改播待机；test-ui 等待机动画画出来再量点击区域。7 个网页测试和 -MotionTests 全过，构建通过。**没装到本机、没在桌面上看过**（尤其启动时第一眼、换动作时有没有空白一下）。
+- 生成新动作的标准站姿：作者 `anim/待机呼吸休闲.webp` 第一帧，绿底版在本机 `D:\video llm\素材\idle_anim_green_1280.png`。图生视频改用云端（Comfy 账号、海螺 H3 Max Turbo 和 Seedance），过程见本机记忆 local-video-gen。
+
 ### 下一步
 
-0. **宣传视频**：等用户决定要不要加背景音乐、发在哪；先读本机的 `build/video-tools/交接.md`。
-   聊到过、用户还没说要做的三件事：换成别的模型后额度条一直显示旧数字（改法：会话开始时 Claude Code 没报任何认得的额度就清掉 `claude-quota.json`，在 `plugin/hooks/register.ts`）；
-   支持 VS Code（现在找不到 Claude 桌面端 30 秒就退出）；让桌宠通过 Claude Code 做简单对话（只提过，没调研）。
-1. **下一版**：没有定版本号和内容。作者以后出放烟花（元旦）、吃饺子 / 收红包 / 写福字（春节）时再接入。查更新：`gh api repos/hunmer/aboutme-pets/commits`，再比 `pets/claude/spritesheet` 的文件列表（比较接口最多列 300 个文件，作者常一次加几百个别的角色的文件）。接入做法见「之后」第一条。注意元旦现在已经是 堆雪人 / 吃糖葫芦 / 吃年糕 三段随机，放烟花来了是加进去还是替换，要问用户。
-2. **等用户定 / 审的**：装点圣诞树 v2 要不要收；Claude 起草、用户还没逐句审的台词（点击四段 `clipLines`、新动作台词、11-10 改的早上好「早上好，刚刷完牙～」）。
-3. **等用户实测确认的**：火气新数值（每秒降 4、门槛 25 / 55 / 90）；额度改成「已用」和橙色额度条；中间帧（撞头、站不稳、趴地、摔倒、派活、查资料、看书）。右键菜单闪烁用户已确认修好（11-08）。
-4. **没处理、交给用户决定的**：静态姿态的晃动和特效 SVG 仍按 60 帧画；精灵图单张解码约 110 MB（dsh-pet 用透明 WebM，改要动素材）；审查遗留几条（见「0.3.0 → 代码审查」）；还剩 23 个单张静态 + 7 套翻页（见「2026-11-08～10」）。
+2026-11-15 用户说：宣传视频**已经发布**；作者**不会再更新动作**，以后的新动作只能自己做。当时定这一轮只在本机做、交接也只留本机；11-16 用户改成发 0.4.2，代码已推送，交接文档用户没说要推，留在本机。
+
+**2026-11-15～16 做的（已随 0.4.2 发布，本机也装了 0.4.2）**：
+- 额度换模型后不清：`plugin/hooks/register.ts` 会话开始时 `$.session.usage()` 拿到结果但一个认得的额度都没有，就写空额度 `NO_QUOTA`（`{ text: '', low: false, bars: [] }`），网页不显示额度、不算紧张、不换钱袋档位。没直接删文件：外壳读不到文件时会跳过，旧数字一直留在页面上。`usage()` 抛错时不动。测试加在 `scripts/test-quota.cjs`。**没在真实会话里验证**：要重新 `install.ps1` 才生效；如果官方账号刚开会话时 `usage()` 也是空的，额度会在第一次回复前空一下，回复后由 `session.measure` 写回。
+- 圣诞收了装点圣诞树 v2（三版随机）。之前说它超出窗口左边，量下来最左 124 像素，比已在用的装点圣诞树（132）只多 8 像素，好几段在用的动画更靠外；首尾都是抱书站姿。见 `anim/SOURCE.md` 末尾。
+- 台词（用户让 Claude 看着改）：傲娇点击 `pout` 改成「哼，戳什么戳……」「才、才没有很开心呢！」「……哼，不理你了。」（原来说「摸」，但这段是点击反应、画面是扭头）；早上好「早上好～我先刷个牙」（画面在刷牙，原来说「刚刷完」）；中午「午饭真香～」（原来「想吃便当」，画面已经在吃）；晚上「晚上好，我在吃晚饭～」（原来「点上灯了」，画面是吃晚餐）。点击四段 `clipLines` 和新动作台词对照画面看过，没改。
+- 7 个网页测试全过。
+- **运行方式**（2026-11-16，用户要求「下载下来双击就能待在桌面上」，本机保持跟着 Claude、待在窗口里）：设置页「通用」新增「跟着 Claude / 独立运行」，所有几只共用，存在 `~/.claudia/run.json`（不放 settings.json：别的那只改了会被第一只存设置时盖掉），每只每秒按文件修改时间看一次，改了就跟上并刷新设置页。
+  - 跟着 Claude = 0.4.1 的样子。独立运行 = Claude 关了也不走（`Pet.Follow.cs` 的 `FollowTick` 跳过退出）；选了「待在 Claude 窗口里」但看不到 Claude 窗口（没开或收进托盘，最小化不算）时先待在桌面上，Claude 窗口出来再回去（`WantDesktop` / `CheckRunMode` / `SwitchArea`，不改存着的 `mode`）。改回跟着 Claude 时重新计时 30 秒，不会马上退出。
+  - 默认值（`Program.ChooseRunMode`，只在没有 run.json 时选一次）：已有 settings.json、由 Claude 叫出来（`--ensure` 现在带 `--by-claude` 启动）、已接入插件或 MCP 的，都是跟着 Claude；只有第一次用、自己双击、又没接入的才设独立运行 + 待在桌面上。所以 0.4.1 升上来的照旧。
+  - 菜单退出的第一次提示按运行方式说「下次打开我就回来」/「下次打开 Claude 我再出来」；多开页说明改成「跟着 Claude 运行时，Claude 关掉后全部一起退出」。
+  - 验证：构建通过，7 个网页测试和 `-MotionTests` 全过。2026-11-16 用户同意后做了桌面实测（单独数据目录、只停不带 `--mcp` 的进程，测完重新打开安装版）：第一次用 + Claude 叫出来 / 第一次用 + 自己打开（本机已接入）/ 升级上来 → 都是跟着 Claude、待在窗口里；独立运行 + 选窗口 → Claude 开着时待在窗口里，改 run.json 一秒内切到跟着 Claude 再切回；独立运行 + 选桌面 → 桌面。**没测到的**：独立运行时关掉 Claude 她留下并移到桌面（得关掉 Claude 本身）；设置页上点那两个按钮（测的是改文件，同一条路）；「没接入过 Claude」那条默认值分支（本机插件和 MCP 都接着）。
+
+**接下来**：
+0. **自己做新动作**：用户想在本机（RTX 4060 Laptop 8 GB）部署轻量开源图生视频模型做小动画。Claude 的评估见本次对话结论：可以试，候选 Wan2.2 TI2V-5B（ComfyUI + 显存卸载）或 FramePack；难点是透明底（要逐帧抠图，头发边缘会闪）、长相漂移、首尾回到标准站姿、镜头不能动。规格照作者的：640×360 一帧、120 帧、12 fps、8×15 拼成 5120×5400 的 webp，第 1 帧人物在 x 206–444、y 40–321。用户还没定要不要装。
+1. 原来等作者出的放烟花（元旦）、吃饺子 / 收红包 / 写福字（春节）不会来了，要做只能自己做。
+2. VS Code 支持、让桌宠接入 LLM 对话：用户定**暂时不做**。
+3. **等用户实测确认的**：火气新数值（每秒降 4、门槛 25 / 55 / 90）；额度「已用」和橙色额度条；中间帧（撞头、站不稳、趴地、摔倒、派活、查资料、看书）。
+4. **没处理、交给用户决定的**：静态姿态的晃动和特效 SVG 仍按 60 帧画；精灵图单张解码约 110 MB；审查遗留几条（见「0.3.0 → 代码审查」）；还剩 23 个单张静态 + 7 套翻页（见「2026-11-08～10」）。
 
 ### 做事的规矩（用户习惯）
 

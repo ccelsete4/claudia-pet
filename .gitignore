@@ -7,3 +7,6 @@ dist/
 .claude/
 *.log
 __pycache__/
+# 交接记录：只留本机，不进 GitHub（2026-11-24 用户定）
+HANDOFF.md
+CODEX_HANDOFF_*.md
