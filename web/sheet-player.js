@@ -40,7 +40,7 @@ function stopSheetClock(s) {
 }
 function startSheetClock(s, draw) {
   if (!s || s.timer !== null || pageHidden || !sheetCanAdvance(s)) return
-  const period = 1000 / SHEET.fps
+  const period = 1000 / (s.fps || SHEET.fps)   // 每个动画可以有自己的帧率（animations[].fps；派活按 15 帧，2026-11-24）
   let due = performance.now() + period
   const tick = () => {
     const now = performance.now()
@@ -73,7 +73,7 @@ function playSheet(a, still, key = null) {
   const name = a.sheets?.find(n => char()?.sheets?.[n] === url)
   const preview = name && char()?.sheets?.[name + '.scaled']
   const asset = preview && fitsScaledSheet() ? preview : url
-  const s = { key, url, asset, from, to: a.to ?? SHEET.frames - 1, hold: a.hold, loop: !!a.loop, cycle: a.cycle, cycled: false, onCycle: null,
+  const s = { key, url, asset, from, to: a.to ?? (a.frames ?? SHEET.frames) - 1, fps: a.fps, hold: a.hold, loop: !!a.loop, cycle: a.cycle, cycled: false, onCycle: null,
     frame: from, dir: 1, holding: false,
     canvas: sheetCanvases.find(c => c !== sheetFront), img: null, timer: null }
   // 还是正在播的这张图（已经解码好）：沿用这块画布和这份图，直接跳到新的起点接着播。

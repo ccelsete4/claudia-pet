@@ -396,7 +396,9 @@ function stopFlip() {
   document.documentElement.classList.remove('flipping')
 }
 function startFlip(p, seq, instant) {
-  if (REDUCED_MOTION.matches || seq.steps.length < 2) { showImage(seq.steps[0][0], instant); return }
+  // 系统要求减少动画时也照样翻页，和精灵图动画一样（2026-11-18 用户定：有动画的姿态一律播）。
+  // 2026-11-23 发现：Linux 桌面关了 GTK 动画（xsettings Gtk/EnableAnimations 0）时 WebKitGTK 报「减少动画」，派活只停在第一张
+  if (seq.steps.length < 2) { showImage(seq.steps[0][0], instant); return }
   for (const [url] of seq.steps.slice(1)) new Image().src = url   // 先把后面几帧载进缓存，到点就能切
   document.documentElement.classList.add('flipping')   // 第一帧也硬切：从上一个姿态直接换过来（撞上 / 着地的那一下）
   showImage(seq.steps[0][0], instant)
@@ -445,7 +447,7 @@ function anim(p) {
 function transientMs(p) {
   const a = anim(p), base = TRANSIENT[p]
   if (!a || !a.full) return base
-  const clip = a.ms || Math.round(((a.to ?? SHEET.frames - 1) - (a.from ?? 0) + 1) / SHEET.fps * 1000) + 150
+  const clip = a.ms || Math.round(((a.to ?? (a.frames ?? SHEET.frames) - 1) - (a.from ?? 0) + 1) / (a.fps || SHEET.fps) * 1000) + 150
   return Math.max(base || 0, clip)
 }
 // 设置变了：当前姿态按新规则重画一次
@@ -762,8 +764,11 @@ function leaveVia(next, target = null) {
   if (document.documentElement.classList.contains('moving') || tumble || multi || farewellLine !== null) return false
   // exit.continue：不跳到 exit.from，从正在播的那一帧一直正着播到收尾结束（循环段播完这一轮、再接视频里原本的后半段），不跳帧、不倒放。
   // 用在循环段两头和收尾对不上的动作上（2026-11-23 有事问你：Wan 出片后半段整体偏了，跳过去会闪一下）。睡觉不用：点醒要马上醒
-  const s = sheet, to = a.exit.to ?? SHEET.frames - 1, p = pose
-  const from = a.exit.continue && s?.img && s.url && a.urls.includes(s.url) && s.frame < a.exit.from ? s.frame : a.exit.from
+  const s = sheet, to = a.exit.to ?? (a.frames ?? SHEET.frames) - 1, p = pose
+  let from = a.exit.continue && s?.img && s.url && a.urls.includes(s.url) && s.frame < a.exit.from ? s.frame : a.exit.from
+  // exit.jump：循环段第 cycle[0] 帧起每一帧在循环末尾最像的那一帧（出片后逐帧比对算好）。停下时先跳过去，只跑完最后一小段再收尾，
+  // 不用把整圈跑完（2026-11-23 派活：循环 5.6 秒、两只布偶每圈都不一样，没法按固定圈长换算）
+  if (a.exit.jump && a.cycle && from >= a.cycle[0] && from <= a.cycle[1]) from = a.exit.jump[from - a.cycle[0]] ?? from
   exiting = { pose: p, next }
   clearTimeout(revertTimer)
   playSheet({ ...a, from, to, hold: null, cycle: null, loop: false, keepUrl: true }, framesFor(p)[0])
@@ -771,7 +776,7 @@ function leaveVia(next, target = null) {
   exitTimer = characterTimeout(() => {
     const e = exiting; exiting = null
     if (e && pose === e.pose) { exitedFrom = e.pose; e.next() }   // 收尾演完了：接下来换姿态时不再演一遍
-  }, Math.round((to - from + 1) / SHEET.fps * 1000) + 150)
+  }, Math.round((to - from + 1) / (a.fps || SHEET.fps) * 1000) + 150)
   return true
 }
 function cancelExit() { if (!exiting) return; exiting = null; clearTimeout(exitTimer) }

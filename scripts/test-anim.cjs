@@ -66,6 +66,17 @@ function manifest() {
       show('thinking', true); frames.push(sheet.frame, sheet.to)
       return frames
     }), [0, 67, 42, 68, 96], 'searching must play the opening, repeat the scan and leave through the close')
+    await page.evaluate(() => setPose('delegating', true))
+    await page.waitForFunction(() => pose === 'delegating' && sheet?.img && sheet.to === 129)
+    assert.deepEqual(await page.evaluate(() => {
+      const frames = [sheet.frame, sheet.fps]
+      sheet.frame = 128
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheet.frame = 100
+      show('thinking', true); frames.push(sheet.frame, sheet.to, sheet.cycle, sheet.fps)
+      return frames
+    }), [0, 15, 129, 88, 100, 170, null, 15], 'delegating (15 fps, 171 frames) must loop the composited run forward and on leaving play on through the close')
     await page.evaluate(() => setPose('asking', true))
     await page.waitForFunction(() => pose === 'asking' && sheet?.img && sheet.to === 47)
     assert.deepEqual(await page.evaluate(() => {

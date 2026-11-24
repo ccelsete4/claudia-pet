@@ -28,7 +28,7 @@ console.log('PASS: frames config (files, grouping, timings vs tumble steps)');
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
     for (const reduced of [false, true]) {
-      const page = await browser.newPage({ viewport: { width: 260, height: 362 }, reducedMotion: reduced ? 'reduce' : 'no-preference' });
+      const page = await browser.newPage({ viewport: { width: 330, height: 362 }, reducedMotion: reduced ? 'reduce' : 'no-preference' });
       const errors = [];
       page.on('pageerror', e => errors.push(e.message));
       await page.goto(pathToFileURL(path.resolve(__dirname, '../web/index.html')).href);
@@ -55,8 +55,8 @@ console.log('PASS: frames config (files, grouping, timings vs tumble steps)');
       await page.evaluate(() => setPose('fallen'));
       if (reduced) {
         await page.waitForTimeout(1500);
-        assert.deepEqual(await shown(), ['fallen-1'], 'reduced motion: only the first frame');
-        assert.equal(await page.evaluate(() => flip), null);
+        // 减少动画时照样翻页（Linux 桌面关掉 GTK 动画时 WebKitGTK 会报减少动画，2026-11-23）
+        assert.deepEqual(await shown(), ['fallen-1', 'fallen', 'fallen-m1', 'fallen-2'], 'reduced motion: frames still flip');
       } else {
         assert.equal(await page.evaluate(() => document.documentElement.classList.contains('flipping')), true);
         await page.waitForTimeout(1500);
@@ -97,13 +97,7 @@ console.log('PASS: frames config (files, grouping, timings vs tumble steps)');
         await page.evaluate(() => setPose('idle'));
         assert.equal(await page.evaluate(() => document.documentElement.classList.contains('flipping')), false);
 
-        // 循环翻页（工作状态）：派活在最后一张过渡帧后接回第一张。
-        await clear();
-        await page.evaluate(() => setPose('delegating'));
-        const order = info.frames.delegating.seq;
-        await page.waitForFunction(n => window.shown.length >= n, order.length + 1, { timeout: 8000 });
-        assert.deepEqual((await shown()).slice(0, order.length + 1), [...order, order[0]], 'delegating loops');
-        await page.evaluate(() => setPose('idle')); await page.waitForTimeout(300);
+        // 循环翻页原来用派活测；2026-11-23 派活换成动画后，已经没有循环翻页的姿态了，这段删掉
         // 碰边整套：碰底边、抽中摇晃 → 站不稳三张 → 趴地两张 → 直接站回待机（不演爬起）
         await clear();
         await page.evaluate(() => { tumblePolicy.hits = 6; tumblePolicy.throwStarted(); tumblePolicy.random = (r => () => r.shift() ?? .5)([0, .9]) });

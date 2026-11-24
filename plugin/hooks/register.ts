@@ -136,6 +136,12 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
+    // 子代理自己的工具调用：主对话还在等它，她继续派活，不跟着它的每一步换成看书、干活（换来换去会闪），
+    // 也不算进「一轮用了多少次工具」。子代理在后台跑时主对话的 Agent 调用马上就返回，靠这里把派活续上（2026-11-24）
+    if (e.agentId) {
+      await setState($, { pose: 'delegating', event: 'PreToolUse', tool: e.tool, ts: now() })
+      return next(e)
+    }
     tools += 1
     if (e.tool.toLowerCase() === 'askuserquestion') await notify($, 'waiting')
     await setState($, { pose: poseForTool(e.tool), event: 'PreToolUse', tool: e.tool, ts: now() })
@@ -146,6 +152,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId) return next(e)   // 子代理做完：不庆祝、不发「完成」通知，主对话接着干
     const r = await next(e)
     const pose = e.reason === 'answer' ? (tools >= BIG_JOB_TOOLS ? 'proud' : 'happy') : e.reason === 'aborted' ? 'surprised' : 'oops'
     tools = 0

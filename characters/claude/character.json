@@ -325,8 +325,7 @@
     "bonk": { "seq": ["bonk", "bonk-m0", "bonk-m1", "bonk-2", "bonk-m2", "bonk-3"], "ms": [450, 100, 120, 480, 200] },
     "stagger": { "seq": ["stagger", "stagger-m1", "stagger-2", "stagger-m2", "stagger-3"], "ms": [300, 150, 300, 150] },
     "faceplant": { "seq": ["faceplant", "faceplant-m1", "faceplant-2"], "ms": [600, 200] },
-    "fallen": { "seq": ["fallen-1", "fallen", "fallen-m1", "fallen-2"], "ms": [300, 700, 200] },
-    "delegating": { "seq": ["delegating", "delegating-m1", "delegating-2", "delegating-m2", "delegating-m2b", "delegating-3", "delegating-m3", "delegating-m3b"], "ms": [1600, 150, 1400, 120, 120, 1100, 120, 120], "loop": true }
+    "fallen": { "seq": ["fallen-1", "fallen", "fallen-m1", "fallen-2"], "ms": [300, 700, 200] }
   },
   "animations": {
     "idle": { "sheets": ["待机呼吸休闲"], "loop": true },
@@ -335,6 +334,7 @@
     "writing": { "sheets": ["写代码"], "loop": true },
     "reading": { "sheets": ["看书-翻页"], "loop": true },
     "searching": { "sheets": ["查资料-扫读翻页"], "to": 67, "cycle": [42, 67], "exit": { "from": 68, "to": 96 } },
+    "delegating": { "sheets": ["派活-小帮手跑圈"], "fps": 15, "frames": 171, "to": 129, "cycle": [88, 129], "exit": { "from": 130, "continue": true } },
     "asking": { "sheets": ["有事问你-举手"], "to": 47, "cycle": [33, 47], "exit": { "from": 48, "to": 95, "continue": true } },
     "running": { "sheets": ["工作状态-忙碌点按"], "loop": true },
     "compact": { "sheets": ["工作状态-清点归档"], "loop": true },
