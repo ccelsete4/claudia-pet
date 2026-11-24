@@ -28,7 +28,8 @@ namespace Claudia
             StopWalk(null);
             if (dragging || flying || concealed || sessionLocked || hwnd == IntPtr.Zero || !AreaRect(out var c)) { Js("walkEnded('blocked')"); return; }
             Native.GetWindowRect(hwnd, out var r);
-            var room = dir < 0 ? r.Left - c.Left : c.Right - r.Right;
+            var (ml, _, mr) = BodyMargins();   // 走到人物本体碰到边为止（见 Pet.Follow.cs）
+            var room = dir < 0 ? r.Left - (c.Left - ml) : (c.Right + mr) - r.Right;
             if (room < WalkMinRoom) { Js("walkEnded('blocked')"); return; }
             walking = true; walkDir = (int)dir; walkSpeed = speed; walkX = r.Left;
             walkLast = walkClock.ElapsedMilliseconds; walkUntil = walkLast + (long)ms;
@@ -54,8 +55,9 @@ namespace Claudia
             int w = r.Right - r.Left, h = r.Bottom - r.Top;
             walkX += walkDir * walkSpeed * dt;
             var edge = false;
-            if (walkX <= c.Left) { walkX = c.Left; edge = true; }
-            if (walkX >= c.Right - w) { walkX = c.Right - w; edge = true; }
+            var (ml, _, mr) = BodyMargins();
+            if (walkX <= c.Left - ml) { walkX = c.Left - ml; edge = true; }
+            if (walkX >= c.Right - w + mr) { walkX = c.Right - w + mr; edge = true; }
             var x = (int)Math.Round(walkX);
             if (x != r.Left) Native.MoveTo(hwnd, x, r.Top);
             // 只在内存里跟着改离右下角的距离：Claude 窗口这时候挪了，跟随也按走到的新位置摆

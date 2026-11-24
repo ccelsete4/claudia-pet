@@ -22,7 +22,7 @@ from . import actions, claude, store, system, web, xshape  # noqa: E402
 from .claude_window import ClaudeWindowWatch  # noqa: E402
 from .notices import TaskNoticePolicy, legacy_notice, pending_notices  # noqa: E402
 
-BASE_W, BASE_H = 260, 362
+BASE_W, BASE_H = 330, 362   # 330：派活的小布偶会跑到人物两边，260 时两边各被窗口切掉一半（2026-11-24）
 STAGGER_X = 190
 HOME_OFF_RIGHT = 40
 DEFAULT_OFF_BOTTOM = 100   # 待在 Claude 窗口里：默认离 Claude 窗口右下角多远（同 Windows 版）

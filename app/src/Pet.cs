@@ -44,7 +44,7 @@ namespace Claudia
         readonly Dictionary<string, string> stamps = new Dictionary<string, string>();
         Forms.NotifyIcon tray;
         SettingsWindow settings;
-        const double BaseWidth = 260, BaseHeight = 362;
+        const double BaseWidth = 330, BaseHeight = 362;   // 330：派活的小布偶会跑到人物两边，260 时两边各被窗口切掉一半（2026-11-24）
         // 文字大小：网页按「人物大小、文字大小」算出的画布（网页 CSS 尺寸），窗口 = 画布 × 人物大小（app/web/text-size.js）
         double pageW = BaseWidth, pageH = BaseHeight;
         double pageFoot = 62;      // 画布底栏高（网页像素）

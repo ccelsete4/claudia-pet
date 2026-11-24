@@ -159,8 +159,7 @@ namespace Claudia
             int x, y;
             if (!shownInClaude || changed) { x = c.Right - w - offRight; y = c.Bottom - h - offBottom; }
             else { x = pr.Left; y = pr.Top; }
-            x = Math.Max(c.Left, Math.Min(x, c.Right - w));
-            y = Math.Max(c.Top, Math.Min(y, c.Bottom - h));
+            ClampToArea(c, w, h, ref x, ref y);
             if (x != pr.Left || y != pr.Top) Native.MoveTo(hwnd, x, y);
             lastClaude = c;
             var wasShown = shownInClaude;
@@ -190,8 +189,8 @@ namespace Claudia
             Native.GetWindowRect(hwnd, out var pr);
             int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top;
             if (!ClaudeRect(out var c)) { Native.MoveTo(hwnd, -10000, -10000); shownInClaude = false; return; }
-            int x = Math.Max(c.Left, Math.Min(c.Right - w - offRight, c.Right - w));
-            int y = Math.Max(c.Top, Math.Min(c.Bottom - h - offBottom, c.Bottom - h));
+            int x = c.Right - w - offRight, y = c.Bottom - h - offBottom;
+            ClampToArea(c, w, h, ref x, ref y);
             Native.MoveTo(hwnd, x, y);
             lastClaude = c; shownInClaude = true;
             FollowNative.PlaceAbove(hwnd, claudeHwnd);
@@ -203,8 +202,8 @@ namespace Claudia
             if (!ClaudeRect(out var c)) return;
             Native.GetWindowRect(hwnd, out var pr);
             int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top;
-            int x = Math.Max(c.Left, Math.Min(pr.Left, c.Right - w));
-            int y = Math.Max(c.Top, Math.Min(pr.Top, c.Bottom - h));
+            int x = pr.Left, y = pr.Top;
+            ClampToArea(c, w, h, ref x, ref y);
             if (x != pr.Left || y != pr.Top) Native.MoveTo(hwnd, x, y);
             offRight = c.Right - (x + w); offBottom = c.Bottom - (y + h);
             lastClaude = c;
@@ -230,6 +229,35 @@ namespace Claudia
         /// <summary>她能活动的范围：窗口模式是 Claude 窗口，桌面模式是显示器工作区</summary>
         bool AreaRect(out Native.RECT r) => desktopMode ? FollowNative.WorkArea(hwnd, dragging, out r) : ClaudeRect(out r);
 
+        // 窗口比人物大（头顶留着气泡，左右给动作留空：派活的小布偶会跑到人物两边，2026-11-24 窗口从 260 加宽到 330）。
+        // 碰边、走到边、夹回看得见的地方都按人物本体算，不按窗口边，不然人离屏幕边还空着一截就被弹回来（同 Linux 版 body_margins）。
+        // 本体 = 网页报来的能点到的区域里最大的那块；拖动、飞行时用开始那一刻的，免得边界跟着气泡变来变去
+        (int l, int t, int r)? motionMargins;
+        (int l, int t, int r) BodyMargins()
+        {
+            if ((dragging || flying) && motionMargins.HasValue) return motionMargins.Value;
+            if (Host == null || hitRects == null || pageW <= 0) return (0, 0, 0);
+            double[] best = null;
+            foreach (var o in hitRects)
+            {
+                if (!(o is object[] a) || a.Length != 4) continue;
+                double[] v;
+                try { v = new[] { Convert.ToDouble(a[0]), Convert.ToDouble(a[1]), Convert.ToDouble(a[2]), Convert.ToDouble(a[3]) }; } catch { continue; }
+                if (best == null || v[2] * v[3] > best[2] * best[3]) best = v;
+            }
+            if (best == null) return (0, 0, 0);
+            var z = Host.Width / pageW;   // 画布像素 → 窗口物理像素（同 UpdateHitRects）
+            return (Math.Max(0, (int)Math.Round(best[0] * z)), Math.Max(0, (int)Math.Round(best[1] * z)),
+                    Math.Max(0, (int)Math.Round(Host.Width - (best[0] + best[2]) * z)));
+        }
+        /// <summary>把窗口左上角夹进 a：人物本体不出 a 的左、上、右边；脚底站在 a 的底边上（名牌、额度要看得见）</summary>
+        void ClampToArea(Native.RECT a, int w, int h, ref int x, ref int y)
+        {
+            var (ml, mt, mr) = BodyMargins();
+            x = Math.Max(a.Left - ml, Math.Min(x, Math.Max(a.Left - ml, a.Right - w + mr)));
+            y = Math.Max(a.Top - mt, Math.Min(y, Math.Max(a.Top - mt, a.Bottom - h)));
+        }
+
         void PlaceHome() { if (desktopMode) PlaceOnDesktop(); else PlaceInClaude(); }
 
         void DesktopPlace()
@@ -239,8 +267,8 @@ namespace Claudia
             else if (!walking && AreaRect(out var a) && Native.GetWindowRect(hwnd, out var pr))
             {
                 // 分辨率、任务栏位置变了，或者那块屏幕拔掉了：夹回看得见的地方
-                int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top;
-                int x = Math.Max(a.Left, Math.Min(pr.Left, a.Right - w)), y = Math.Max(a.Top, Math.Min(pr.Top, a.Bottom - h));
+                int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top, x = pr.Left, y = pr.Top;
+                ClampToArea(a, w, h, ref x, ref y);
                 if (x != pr.Left || y != pr.Top) Native.MoveTo(hwnd, x, y);
             }
             KeepOnTop();
@@ -263,8 +291,7 @@ namespace Claudia
                 if (!FollowNative.WorkAreaAt(0, 0, out a, primary: true)) return;
                 x = a.Right - w - HomeOffRight; y = a.Bottom - h;
             }
-            x = Math.Max(a.Left, Math.Min(x, a.Right - w));
-            y = Math.Max(a.Top, Math.Min(y, a.Bottom - h));
+            ClampToArea(a, w, h, ref x, ref y);
             Native.MoveTo(hwnd, x, y);
             shownInClaude = true;
             topmostAt = DateTime.MinValue;
@@ -284,8 +311,8 @@ namespace Claudia
         void SaveDeskPosition()
         {
             if (!AreaRect(out var a) || !Native.GetWindowRect(hwnd, out var pr)) return;
-            int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top;
-            int x = Math.Max(a.Left, Math.Min(pr.Left, a.Right - w)), y = Math.Max(a.Top, Math.Min(pr.Top, a.Bottom - h));
+            int w = pr.Right - pr.Left, h = pr.Bottom - pr.Top, x = pr.Left, y = pr.Top;
+            ClampToArea(a, w, h, ref x, ref y);
             if (x != pr.Left || y != pr.Top) Native.MoveTo(hwnd, x, y);
             Store.Settings["desk"] = new Dictionary<string, object> { ["x"] = x, ["y"] = y };
             Store.SaveSettings();

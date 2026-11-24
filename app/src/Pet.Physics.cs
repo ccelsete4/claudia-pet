@@ -74,10 +74,11 @@ namespace Claudia
         Dictionary<string, object> MotionGeometry()
         {
             if (!AreaRect(out var c) || !Native.GetWindowRect(hwnd, out var r)) return null;
+            var (ml, mt, mr) = BodyMargins();   // 按人物本体碰边（见 Pet.Follow.cs）
             return new Dictionary<string, object> {
-                ["minX"] = c.Left, ["minY"] = c.Top,
-                ["maxX"] = Math.Max(c.Left, c.Right - (r.Right-r.Left)),
-                ["maxY"] = Math.Max(c.Top, c.Bottom - (r.Bottom-r.Top)),
+                ["minX"] = c.Left - ml, ["minY"] = c.Top - mt,
+                ["maxX"] = Math.Max(c.Left - ml, c.Right - (r.Right-r.Left) + mr),
+                ["maxY"] = Math.Max(c.Top - mt, c.Bottom - (r.Bottom-r.Top)),
             };
         }
         Dictionary<string, object> MotionPacket() => new Dictionary<string, object> {
@@ -88,6 +89,7 @@ namespace Claudia
             StopWalk(null);   // 走着的时候被你拎起来
             StopMotion(false);
             if (!ready || hwnd == IntPtr.Zero) return;
+            motionMargins = null; motionMargins = BodyMargins();   // 这一次拖动、甩出去都按这一刻的人物本体碰边
             var packet = MotionPacket();
             if (packet["bounds"] == null) return;
             Native.GetWindowRect(hwnd, out var r);
