@@ -142,11 +142,13 @@ const root = path.resolve(__dirname, '..');
     await page.evaluate(() => {setBehavior({idleEnabled:false});setPose('idle',true);idleTick();});
     assert.equal(await page.evaluate(()=>pose),'idle');
     const clickStart = await page.locator('#quota').boundingBox();
-    const clickState = await page.evaluate(()=>{setBehavior({clickBounce:true,idleEnabled:false});setPose('idle',true);handleClick('pat');return {pose,bouncing:clickSequence.busy};});
+    // 弹跳只有 0.22 秒：点完马上在同一次执行里查（原来等 80 毫秒再查，Windows 上浏览器一忙弹跳就演完了，三次挂两次，2026-11-24）
+    const clickState = await page.evaluate(()=>{setBehavior({clickBounce:true,idleEnabled:false});setPose('idle',true);handleClick('pat');
+      const q=$('quota').getBoundingClientRect();
+      return {pose,bouncing:clickSequence.busy,play:getComputedStyle($('body')).animationPlayState,quota:{x:q.x,y:q.y,width:q.width,height:q.height}};});
     assert.ok(clickState.bouncing && ['pat','pout'].includes(clickState.pose),'reaction should start alongside Q bounce');
-    await page.waitForTimeout(80);
-    assert.equal(await page.locator('#body').evaluate(el=>getComputedStyle(el).animationPlayState),'paused');
-    assert.deepEqual(await page.locator('#quota').boundingBox(),clickStart);
+    assert.equal(clickState.play,'paused','body sway should pause during the Q bounce');
+    assert.deepEqual(clickState.quota,clickStart,'quota moved during the Q bounce');
     await page.waitForFunction(()=>!clickSequence.busy);
     assert.equal(await page.evaluate(()=>{sulking=true;coax=0;setPose('sulk',true);handleClick('pat');handleClick('pat');handleClick('pat');return pose;}),'forgiven','rapid pats no longer coax her immediately');
     await page.evaluate(()=>{handleClick('pat');shownAt=0;applyCharState('claude',{pose:'reading',event:'PreToolUse',tool:'Read',ts:Date.now()/1000});});

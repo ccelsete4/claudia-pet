@@ -1203,7 +1203,7 @@ class Pet:
                 g = Gtk.MenuItem(label=group)
                 g.set_submenu(sub)
                 root.append(g)
-        others = sorted(p for p in have if p not in used)
+        others = sorted(p for p in have if p not in used and p not in actions.HIDDEN)
         if others:
             sub = Gtk.Menu()
             for p in others:

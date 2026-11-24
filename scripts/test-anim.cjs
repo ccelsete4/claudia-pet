@@ -66,6 +66,22 @@ function manifest() {
       show('thinking', true); frames.push(sheet.frame, sheet.to)
       return frames
     }), [0, 67, 42, 68, 96], 'searching must play the opening, repeat the scan and leave through the close')
+    await page.evaluate(() => setPose('busy', true))
+    await page.waitForFunction(() => pose === 'busy' && sheet?.img && sheet.to === 81)
+    assert.deepEqual(await page.evaluate(() => {
+      const frames = [sheet.frame, sheet.fps]
+      sheet.frame = 80
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheetStep(sheet); frames.push(sheet.frame)
+      sheet.frame = 60
+      show('thinking', true); frames.push(sheet.frame, sheet.to, sheet.cycle)
+      return frames
+    }), [16, 15, 81, 51, 60, 96, null], 'busy must keep turning (cycle 51-81, never standing still) and, when leaving, play on into the standing end')
+    await page.evaluate(() => { setPose('idle', true); setPose('busy', true) })
+    await page.waitForFunction(() => pose === 'busy' && sheet?.img && sheet.to === 81)   // 精灵图读好之后才知道她看哪边
+    assert.deepEqual(await page.evaluate(() => { sheet.frame = 30; demoFocus()
+      const r = [demo?.cards.length, demo?.cards.filter(c => c.el.classList.contains('focus')).map(c => c.side).join()]
+      setPose('idle', true); r.push(demo); return r }), [2, 'left', null], 'busy from the menu must show two demo cards that light up with her gaze and go away afterwards')
     await page.evaluate(() => setPose('delegating', true))
     await page.waitForFunction(() => pose === 'delegating' && sheet?.img && sheet.to === 129)
     assert.deepEqual(await page.evaluate(() => {

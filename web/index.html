@@ -358,6 +358,7 @@ function setPose(p, instant) {
   if (p !== pose) exitedFrom = null
   stopFlip()
   pose = p; poseSince = Date.now()
+  demoCards()
   const a = anim(p)
   if (a) {   // 动画自己在动、画面里自带道具和特效：不叠 CSS 晃动和我们画的特效
     playSheet(a, framesFor(p)[0])
@@ -1216,10 +1217,12 @@ function flipCard(c) {
   c.el.querySelector('svg').style.transform = cloud && c.side === 'left' ? 'scaleX(-1)' : ''
 }
 function startMulti() {
+  if (demo) { const p = pose; pose = null; demoCards(); pose = p }   // 真的多会话来了：示意卡片先收起
   clearTimeout(thinkTimer); clearTimeout(pending); clearTimeout(revertTimer); clearTimeout(stuckTimer)
   multi = { side: 'left', cards: new Map(), order: [], busy: 0, asking: false }
   $('fx').classList.add('hide')
-  multi.flipTimer = setInterval(() => { if (multi && !multi.asking) { multi.side = multi.side === 'left' ? 'right' : 'left'; multiPose() } }, SESSION_FLIP)
+  multi.flipTimer = setInterval(() => { if (multi && !multi.asking && pose !== 'busy') { multi.side = multi.side === 'left' ? 'right' : 'left'; multiPose() } }, SESSION_FLIP)
+  multi.lookTimer = setInterval(multiLook, 100)
   chatterLater()
 }
 // 多会话的台词：刚手忙脚乱时、升级成太忙时、有对话开始等你回答时各说一句（台词在 character.json 的 busy / swamped / asking），4 秒后收起
@@ -1247,14 +1250,59 @@ function multiPose() {
   multi.said = level
   if (multi.asking) { if (pose !== 'asking') { setPose('asking'); $('fx').classList.add('hide') } }
   else {
-    const p = `${multi.busy >= 3 ? 'swamped' : 'busy'}_${multi.side}`
+    // 两个对话：有「忙碌」动画就整段循环播（她自己左右看，卡片跟着她看的方向亮，见 multiLook）；没有就用左右两张静态图来回切
+    const p = multi.busy < 3 && anim('busy') ? 'busy' : `${multi.busy >= 3 ? 'swamped' : 'busy'}_${multi.side}`
     if (pose !== p) { setPose(p, true); $('fx').classList.add('hide') }
   }
+  multiFocus()
+}
+// 不是真的多会话、却在演「忙碌 / 忙不过来」（右键菜单点播）：摆两张示意卡片，不然她对着空气左右看。
+// 卡片跟真的多会话一样亮（忙碌按动画里她看的方向，忙不过来按左右哪张图），换别的姿态就收起（2026-11-24 用户反馈）
+let demo = null
+function demoCards() {
+  const want = !multi && (pose === 'busy' || pose === 'swamped_left' || pose === 'swamped_right')
+  if (!want) {
+    if (demo) { clearInterval(demo.timer); for (const c of demo.cards) { c.el.classList.remove('on'); setTimeout(() => c.el.remove(), 400) } demo = null }
+    return
+  }
+  if (!demo) {
+    demo = { cards: [], timer: null }
+    ;[['left', -6, 'reading'], ['right', 190, 'running']].forEach(([side, x, prop]) => {
+      const c = { el: document.createElement('div'), pose: null, shownAt: 0, side }
+      c.el.className = 'scard'; c.el.innerHTML = '<svg></svg><div class="badge">✓</div>'
+      c.el.style.left = x + 'px'; c.el.style.top = '92px'
+      $('cards').appendChild(c.el); demo.cards.push(c)
+      setCardPose(c, prop)
+      requestAnimationFrame(() => c.el.classList.add('on'))
+    })
+    demo.timer = setInterval(demoFocus, 100)
+  }
+  demoFocus()
+}
+function demoFocus() {
+  if (!demo) return
+  let side = null
+  if (pose === 'swamped_left') side = 'left'
+  else if (pose === 'swamped_right') side = 'right'
+  else if (pose === 'busy' && sheet?.img) { const hit = (anim('busy')?.look || []).find(([a, b]) => sheet.frame >= a && sheet.frame <= b); side = hit ? hit[2] : null }
+  for (const c of demo.cards) c.el.classList.toggle('focus', c.side === side)
+}
+function multiFocus() {
   for (const c of multi.cards.values()) c.el.classList.toggle('focus', !multi.asking ? c.side === multi.side : c.el.classList.contains('ask'))
+}
+// 「忙碌」动画里她看哪边：animations.busy.look = [[起, 止, 'left'|'right'], …]（出片后逐帧标的）。看正前方时两边都不亮
+function multiLook() {
+  if (!multi || multi.asking || pose !== 'busy' || !sheet?.img) return
+  const look = anim('busy')?.look || []
+  const hit = look.find(([a, b]) => sheet.frame >= a && sheet.frame <= b)
+  const side = hit ? hit[2] : null
+  if (side === multi.side) return
+  multi.side = side
+  multiFocus()
 }
 function endMulti() {
   if (!multi) return
-  clearInterval(multi.flipTimer); clearTimeout(multi.recheck); clearTimeout(multi.sayTimer); clearTimeout(multi.chatter)
+  clearInterval(multi.flipTimer); clearInterval(multi.lookTimer); clearTimeout(multi.recheck); clearTimeout(multi.sayTimer); clearTimeout(multi.chatter)
   for (const c of multi.cards.values()) { c.el.classList.remove('on'); setTimeout(() => c.el.remove(), 400) }
   $('more').classList.remove('on')
   multi = null
