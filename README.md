@@ -2,7 +2,7 @@
 
 <img src="icon/AppIcon.png" width="144" alt="claudia 抱着 Clawd 的图标">
 
-claudia-pet 是一个 Windows 上的 Claude 桌宠（也有 Linux 版，见 [linux/README.md](linux/README.md)）。桌宠的名字叫 claudia，她待在 Claude 桌面端的窗口里（也可以放到桌面上），跟着 Claude Code 的工作状态做动作，陪你聊天、写代码。
+claudia-pet 是一个 Windows 上的 Claude 桌宠（也有 Linux 版，见 [linux/README.md](linux/README.md)；macOS 有社区维护的版本，见下方[其他平台](#其他平台)）。桌宠的名字叫 claudia，她待在 Claude 桌面端的窗口里（也可以放到桌面上），跟着 Claude Code 的工作状态做动作，陪你聊天、写代码。
 
 本项目基于 [CrossPet](https://github.com/lokicorvus/crosspet)（lokicorvus）修改而来，并参考了 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)（PC2005-cloud）。代码、立绘、图标各自的来源和授权写在本文末尾的「来源与授权」和 [NOTICE.md](NOTICE.md) 里。这是非官方同人项目，与 Anthropic 无关。
 
@@ -158,6 +158,15 @@ pwsh -NoProfile -File scripts/install.ps1
 ```
 
 程序装在 `%LOCALAPPDATA%\Programs\claudia-pet`，设置、日志和状态文件在 `%USERPROFILE%\.claudia`，不需要管理员权限，也不会加开机自启。
+
+### 其他平台
+
+本仓库只维护 Windows 和 Linux 版。下面两个 macOS 版由社区成员基于本项目制作，主仓库没有在 Mac 上测试过，使用问题请到对应仓库反馈：
+
+- [FLynn1213/claudia-pet-mac](https://github.com/FLynn1213/claudia-pet-mac)：Swift + AppKit，能待在 Claude 窗口里，Chat 模式下也有回复动画；不支持多开。
+- [Skrrrrry/claudia-pet（macos-port 分支）](https://github.com/Skrrrrry/claudia-pet/tree/macos-port/macos)：Python + PyObjC，结构和 Linux 版一致，支持多开；只能待在桌面上。
+
+它们基于 0.4.2 前后的版本，之后新增的动作不一定有。
 
 ## 接入 Claude
 
